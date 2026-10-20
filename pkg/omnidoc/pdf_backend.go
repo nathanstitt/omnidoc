@@ -14,6 +14,7 @@ import (
 	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
 	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
+	"github.com/nathanstitt/omnidoc/pkg/resource"
 )
 
 // pdfRenderer renders a parsed PDF document. The *pdf.Document is read-only after
@@ -36,6 +37,20 @@ type pdfRenderer struct {
 }
 
 func (r *pdfRenderer) pageCount() int { return r.doc.PageCount() }
+
+// dataURILoader resolves only data: URIs, which is all extraction emits: a PDF's
+// images are carried into the structure tree as inline data: sources, so a
+// media-embedding writer (DOCX, EPUB, PPTX, RTF) needs no file or network access
+// to fetch them.
+type dataURILoader struct{}
+
+func (dataURILoader) Load(_ context.Context, ref string) ([]byte, string, error) {
+	return resource.LoadDataURL(ref)
+}
+
+// resourceLoader exposes the data: URI loader so media-embedding backends can
+// embed the images extraction recovered from the PDF.
+func (r *pdfRenderer) resourceLoader() resource.ResourceLoader { return dataURILoader{} }
 
 // cssboxRoot lazily extracts the PDF's logical structure (paragraphs, headings, lists,
 // tables) into a cssbox tree the conversion backends walk, satisfying reflowTree so

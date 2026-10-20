@@ -196,8 +196,8 @@ func structureRoot(d *Document, writer string) (*cssbox.Box, error) {
 
 // reflowResources is implemented by renderers that retain their source's resource
 // loader, so a conversion backend that embeds media (the DOCX writer) can fetch the
-// document's images. The PDF renderer does not implement it (extraction carries no
-// image bytes), so its images degrade gracefully.
+// document's images. The PDF renderer implements it with a data: URI loader, because
+// extraction carries a PDF's images inline.
 type reflowResources interface {
 	resourceLoader() resource.ResourceLoader
 }

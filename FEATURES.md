@@ -856,6 +856,20 @@ CLI `convert in.pdf out.md` / `out.html`):
   writer reuses. A new `pkg/internal/htmlwrite` serializes `cssbox`→HTML with native
   `colspan`/`rowspan`. PDF `Document` satisfies `reflowTree` via lazy extraction. ToUnicode CMaps
   (Type0/CID text), font weight/slant, and scanned-PDF OCR are follow-ups.
+- **Images are carried through** (`pkg/internal/extract/images.go`). The extractor's device records every
+  `DrawImage` the interpreter issues, and image XObjects and inline images decode through the same
+  `raster.ResolveImage`/`ResolveInlineImage` a page render uses. Each image lowers to a block-level
+  `<p><img src="data:…">` placed among the prose by its top edge and column (an image in the left column
+  of a two-column page lands in the left column's flow; a page of only pictures, like a scan, yields just
+  them). The CTM's flips and rotations, `/Rotate` included, are baked into the pixels because an `<img>`
+  carries no transform. Opaque images encode as JPEG when that is under half the PNG size, else PNG;
+  translucent ones as PNG. Because the tree is shared, Markdown, HTML, DOCX, PPTX, RTF, and EPUB all carry
+  the picture (the PDF backend now supplies a `data:` loader to the media-embedding writers; EPUB keeps
+  the `data:` source inline like every EPUB it writes); plain text and CSV/TSV/XLSX drop it by design.
+  Marks under 2pt on a side (a stretched 1-pixel spacer) are skipped with a debug log. A clip path crops the
+  picture to the clip's BOUNDING BOX (nested clips intersect, q/Q scopes them), and an image the clip hides
+  entirely is skipped with a log; a non-rectangular clip (a circle crop) keeps its whole bounding square.
+  Not honored, and silent: blend modes and constant alpha on a picture.
 - **Right-to-left text extracts in LOGICAL order** (`pkg/internal/extract/bidi.go`). A PDF stores glyphs
   by POSITION, so sorting a line left-to-right yielded RTL script reversed. Each maximal RTL run is
   reversed back at BOTH levels the PDF mirrors: the characters within a word, and the order of

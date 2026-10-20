@@ -482,21 +482,30 @@ func clampAlpha(a float64) float64 {
 }
 
 func (r *pageResources) Image(name string, fill render.FillColor) (image.Image, bool) {
-	xobjs := r.doc.GetDict(r.dict["XObject"])
+	return ResolveImage(r.doc, r.dict, name, fill, r.logf)
+}
+
+// ResolveImage decodes the image XObject called name in the resource dictionary
+// res. The rasterizer and the structure extractor share it, so a PDF image
+// decodes identically whether it is painted or carried into a Markdown/DOCX
+// conversion. It reports false for a missing, non-image, or undecodable
+// XObject (logged through logf, which may be nil).
+func ResolveImage(doc *pdf.Document, res pdf.Dict, name string, fill render.FillColor, logf func(string, ...any)) (image.Image, bool) {
+	xobjs := doc.GetDict(res["XObject"])
 	if xobjs == nil {
 		return nil, false
 	}
-	s := r.doc.GetStream(xobjs[pdf.Name(name)])
+	s := doc.GetStream(xobjs[pdf.Name(name)])
 	if s == nil {
 		return nil, false
 	}
-	if sub, _ := r.doc.GetName(s.Dict["Subtype"]); sub != "Image" {
+	if sub, _ := doc.GetName(s.Dict["Subtype"]); sub != "Image" {
 		return nil, false
 	}
-	img, err := decodeImageXObject(r.doc, s, fill, r.logf)
+	img, err := decodeImageXObject(doc, s, fill, logf)
 	if err != nil {
-		if r.logf != nil {
-			r.logf("raster: image %q: %v", name, err)
+		if logf != nil {
+			logf("raster: image %q: %v", name, err)
 		}
 		return nil, false
 	}
@@ -531,6 +540,11 @@ var inlineCSAliases = map[string]string{
 // normalizes the abbreviated keys into a synthetic stream dict and reuses the
 // XObject image-decode path, so the two share color-space and bit-depth handling.
 func (r *pageResources) InlineImage(dict pdf.Dict, data []byte, fill render.FillColor) (image.Image, bool) {
+	return ResolveInlineImage(r.doc, dict, data, fill, r.logf)
+}
+
+// ResolveInlineImage is ResolveImage for a BI...ID...EI inline image.
+func ResolveInlineImage(doc *pdf.Document, dict pdf.Dict, data []byte, fill render.FillColor, logf func(string, ...any)) (image.Image, bool) {
 	// Normalize abbreviated keys to their full forms.
 	norm := pdf.Dict{}
 	for k, v := range dict {
@@ -546,10 +560,10 @@ func (r *pageResources) InlineImage(dict pdf.Dict, data []byte, fill render.Fill
 		}
 	}
 
-	img, err := decodeInlineImage(r.doc, norm, data, fill, r.logf)
+	img, err := decodeInlineImage(doc, norm, data, fill, logf)
 	if err != nil {
-		if r.logf != nil {
-			r.logf("raster: inline image: %v", err)
+		if logf != nil {
+			logf("raster: inline image: %v", err)
 		}
 		return nil, false
 	}
