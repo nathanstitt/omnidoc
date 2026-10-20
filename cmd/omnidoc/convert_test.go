@@ -460,3 +460,53 @@ func TestCropFlagsAreReorderable(t *testing.T) {
 		}
 	}
 }
+
+const pixelHTML = `<p>Pic</p><img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==">`
+
+func TestConvertCmdImagesDir(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.html")
+	if err := os.WriteFile(in, []byte(pixelHTML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "doc", "out.md")
+	if err := os.MkdirAll(filepath.Dir(out), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The flag may follow the positionals.
+	if err := convertCmd([]string{in, out, "--images-dir", filepath.Join(dir, "doc", "out_images")}); err != nil {
+		t.Fatalf("convertCmd: %v", err)
+	}
+	data, _ := os.ReadFile(out)
+	if !strings.Contains(string(data), "](out_images/") || strings.Contains(string(data), "data:") {
+		t.Errorf("markdown should link out_images/ relative to the output:\n%s", data)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(dir, "doc", "out_images")); len(entries) != 1 {
+		t.Errorf("%d image files, want 1", len(entries))
+	}
+}
+
+func TestConvertCmdImagesDirRejectsOtherFormats(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in.html")
+	if err := os.WriteFile(in, []byte(pixelHTML), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := convertCmd([]string{in, filepath.Join(dir, "out.pdf"), "--images-dir", filepath.Join(dir, "i")})
+	if err == nil || !strings.Contains(err.Error(), "--images-dir") {
+		t.Errorf("err = %v, want a --images-dir format error", err)
+	}
+}
+
+func TestImageLinkPrefix(t *testing.T) {
+	for _, c := range []struct{ dir, out, want string }{
+		{"out_images", "out.md", "out_images"},
+		{"a/imgs", "a/out.md", "imgs"},
+		{"imgs", "a/out.md", "../imgs"},
+		{"imgs", "-", "imgs"},
+	} {
+		if got := imageLinkPrefix(c.dir, c.out); got != c.want {
+			t.Errorf("imageLinkPrefix(%q,%q) = %q, want %q", c.dir, c.out, got, c.want)
+		}
+	}
+}

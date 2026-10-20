@@ -870,6 +870,13 @@ CLI `convert in.pdf out.md` / `out.html`):
   picture to the clip's BOUNDING BOX (nested clips intersect, q/Q scopes them), and an image the clip hides
   entirely is skipped with a log; a non-rectangular clip (a circle crop) keeps its whole bounding square.
   Not honored, and silent: blend modes and constant alpha on a picture.
+- **Images as files** (`--images-dir DIR`; `MarkdownOptions`/`HTMLWriteOptions` `ImageDir` + `ImageRef`).
+  Markdown and HTML output can save each embedded `data:` image into a directory and link it, instead of
+  inlining base64. Files are named by a hash of their bytes, so the same picture is one file and output is
+  deterministic; the directory is created only when there is an image. The CLI links relative to the output
+  file; the API's `ImageRef` sets the link prefix (default: the directory's base name). Any source works,
+  not only PDF; remote and relative references are left alone. A write failure keeps the inline image
+  and logs it. The CLI rejects the flag for other output formats.
 - **Right-to-left text extracts in LOGICAL order** (`pkg/internal/extract/bidi.go`). A PDF stores glyphs
   by POSITION, so sorting a line left-to-right yielded RTL script reversed. Each maximal RTL run is
   reversed back at BOTH levels the PDF mirrors: the characters within a word, and the order of

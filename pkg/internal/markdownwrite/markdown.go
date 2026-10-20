@@ -26,6 +26,10 @@ type Options struct {
 	// hashes, and link URLs are dropped; block and table structure is kept as
 	// whitespace. The default (false) renders GFM Markdown.
 	Plain bool
+	// ImageSrc, when non-nil, rewrites each image's src before it is written, so a
+	// caller can move an embedded data: image to a file and reference that instead.
+	// Returning "" drops the image. nil keeps every src as is.
+	ImageSrc func(src string) string
 	// Logf receives degradation messages (e.g. a synthesized table header). May be
 	// nil (messages discarded).
 	Logf func(string, ...any)

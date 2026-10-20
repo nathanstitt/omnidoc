@@ -23,7 +23,7 @@ func (w *writer) inline(b *cssbox.Box) string {
 // around the whole run. Italic/code/link emphasis is still honored.
 func (w *writer) inlineOpt(b *cssbox.Box, suppressBold bool) string {
 	var runs []boxwalk.StyledRun
-	boxwalk.CollectRuns(b, boxwalk.InlineState{}, imageMarkup, &runs)
+	boxwalk.CollectRuns(b, boxwalk.InlineState{}, w.imageMarkup, &runs)
 	runs = boxwalk.Coalesce(runs)
 	var sb strings.Builder
 	for _, r := range runs {
@@ -36,9 +36,13 @@ func (w *writer) inlineOpt(b *cssbox.Box, suppressBold bool) string {
 }
 
 // imageMarkup renders an <img> replaced box as a Markdown image "![alt](src)". A
-// missing src yields "" (dropped); a missing alt yields an empty label.
-func imageMarkup(rc *cssbox.ReplacedContent) string {
+// missing src yields "" (dropped); a missing alt yields an empty label. The ImageSrc
+// hook, when set, rewrites the src first.
+func (w *writer) imageMarkup(rc *cssbox.ReplacedContent) string {
 	src := rc.Attrs["src"]
+	if src != "" && w.opts.ImageSrc != nil {
+		src = w.opts.ImageSrc(src)
+	}
 	if src == "" {
 		return ""
 	}
