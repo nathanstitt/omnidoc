@@ -30,10 +30,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # Track the latest 1.25 patch, as ci.yml does: setup-go treats go.mod's
-          # `go` directive as an exact pin, and a release built on 1.25.0 would
+          # Track the latest 1.26 patch, as ci.yml does: setup-go treats go.mod's
+          # `go` directive as an exact pin, and a release built on 1.26.0 would
           # ship every stdlib vulnerability the later patches fixed.
-          go-version: "1.25.x"
+          go-version: "1.26.x"
           check-latest: true
           cache: true
 
