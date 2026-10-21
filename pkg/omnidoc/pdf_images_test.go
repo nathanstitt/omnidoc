@@ -103,7 +103,7 @@ func TestPDFImagesMarkdown(t *testing.T) {
 	above := strings.Index(md, "above the picture")
 	pic := strings.Index(md, "![")
 	below := strings.Index(md, "below the picture")
-	if !(above < pic && pic < below) {
+	if above >= pic || pic >= below {
 		t.Errorf("reading order wrong: above=%d image=%d below=%d", above, pic, below)
 	}
 	img := firstDataImage(t, md)
@@ -203,7 +203,7 @@ func TestPDFImagesEPUB(t *testing.T) {
 		}
 		var b bytes.Buffer
 		_, _ = b.ReadFrom(rc)
-		rc.Close()
+		_ = rc.Close()
 		if !strings.Contains(b.String(), `<img src="data:image/`) {
 			t.Errorf("chapter lacks an inline image:\n%.600s", b.String())
 		}
@@ -233,7 +233,7 @@ func handPDF(objs []string) []byte {
 	xref := b.Len()
 	b.WriteString("xref\n0 " + strconv.Itoa(len(objs)+1) + "\n0000000000 65535 f \n")
 	for _, o := range offs {
-		b.WriteString(fmt.Sprintf("%010d 00000 n \n", o))
+		fmt.Fprintf(&b, "%010d 00000 n \n", o)
 	}
 	b.WriteString("trailer\n<< /Size " + strconv.Itoa(len(objs)+1) + " /Root 1 0 R >>\nstartxref\n" + strconv.Itoa(xref) + "\n%%EOF\n")
 	return b.Bytes()

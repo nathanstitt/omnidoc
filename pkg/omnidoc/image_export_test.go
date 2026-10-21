@@ -40,7 +40,7 @@ func TestImageDirMarkdown(t *testing.T) {
 	if err != nil {
 		t.Fatalf("linked file missing: %v", err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	if _, _, err := image.Decode(f); err != nil {
 		t.Errorf("linked file is not an image: %v", err)
 	}
