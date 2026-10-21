@@ -33,13 +33,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # "1.25.x", not go-version-file. go.mod's `go` directive is the module's
-          # MINIMUM (1.25.0), and setup-go treats it as an exact pin -- so reading
-          # from the file built every run on 1.25.0 itself, thirteen patch releases
+          # "1.26.x", not go-version-file. go.mod's `go` directive is the module's
+          # MINIMUM (1.26.0), and setup-go treats it as an exact pin -- so reading
+          # from the file built every run on 1.26.0 itself, thirteen patch releases
           # behind, carrying eight known stdlib vulnerabilities that govulncheck
-          # duly reported. Testing on the latest 1.25 patch matches what a user
+          # duly reported. Testing on the latest 1.26 patch matches what a user
           # building from source gets, while go.mod keeps stating the real floor.
-          go-version: "1.25.x"
+          go-version: "1.26.x"
           check-latest: true
           cache: true
 
@@ -65,7 +65,7 @@ jobs:
       # safe to have it gate the build rather than just report.
       #
       # It scans the standard library too, against the toolchain in use — which is
-      # how the pinned-to-1.25.0 problem above was found: eight stdlib advisories
+      # how the pinned-to-1.26.0 problem above was found: eight stdlib advisories
       # that a current patch release already fixes. A failure here naming only
       # stdlib packages means the runner's Go is behind, not that this repo has
       # work to do; the fix is the Go version in the setup step, not the code.
@@ -130,13 +130,13 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          # "1.25.x", not go-version-file. go.mod's `go` directive is the module's
-          # MINIMUM (1.25.0), and setup-go treats it as an exact pin -- so reading
-          # from the file built every run on 1.25.0 itself, thirteen patch releases
+          # "1.26.x", not go-version-file. go.mod's `go` directive is the module's
+          # MINIMUM (1.26.0), and setup-go treats it as an exact pin -- so reading
+          # from the file built every run on 1.26.0 itself, thirteen patch releases
           # behind, carrying eight known stdlib vulnerabilities that govulncheck
-          # duly reported. Testing on the latest 1.25 patch matches what a user
+          # duly reported. Testing on the latest 1.26 patch matches what a user
           # building from source gets, while go.mod keeps stating the real floor.
-          go-version: "1.25.x"
+          go-version: "1.26.x"
           check-latest: true
           cache: true
 

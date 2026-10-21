@@ -50,8 +50,24 @@ func Lower(doc *pdf.Document, logf func(string, ...any)) (*cssbox.Box, error) {
 // removed from the flow; the remaining lines are ordered and classified.
 func lowerPage(pc *pageContent, logf func(string, ...any)) []*cssbox.Box {
 	lines := buildLines(pc.glyphs)
+	var imgs []imageRef
+	for _, im := range pc.images {
+		im, visible := im.cropped()
+		if !visible {
+			if logf != nil {
+				logf("extract: dropping an image its clip path hides entirely")
+			}
+			continue
+		}
+		if keepImage(im) {
+			imgs = append(imgs, im)
+		} else if logf != nil {
+			logf("extract: dropping %.1fx%.1fpt image below the %.0fpt content floor", im.x1-im.x0, im.y1-im.y0, minImagePt)
+		}
+	}
 	if len(lines) == 0 {
-		return nil
+		// A page of pictures only (a scan, a photo) still yields its images.
+		return imageBoxes(placeImages(nil, imgs)[0], logf)
 	}
 	bodySize := bodyFontSize(lines)
 
@@ -72,8 +88,10 @@ func lowerPage(pc *pageContent, logf func(string, ...any)) []*cssbox.Box {
 	// heading, list — rather than hoisting the table to the front.
 	blocks := orderBlocks(lines, pc.width, pc.height, bodySize)
 	var out []*cssbox.Box
+	slots := placeImages(blocks, imgs)
 	inserted := tblBox == nil
-	for _, b := range blocks {
+	for i, b := range blocks {
+		out = append(out, imageBoxes(slots[i], logf)...)
 		if !inserted && blockTop(b) >= tblYTop {
 			out = append(out, tblBox)
 			inserted = true
@@ -83,6 +101,7 @@ func lowerPage(pc *pageContent, logf func(string, ...any)) []*cssbox.Box {
 	if !inserted {
 		out = append(out, tblBox) // table sits below every block (or there are none)
 	}
+	out = append(out, imageBoxes(slots[len(blocks)], logf)...)
 
 	// Group runs of consecutive list-item boxes under a synthetic list container, so
 	// the tree matches what real HTML/DOCX frontends produce (list items always sit
@@ -310,4 +329,16 @@ func cellStyle() gcss.ComputedStyle {
 	cs := gcss.InitialStyle()
 	cs.Display = "table-cell"
 	return cs
+}
+
+// imageBoxes lowers images to boxes in the order given, skipping any that cannot
+// be encoded.
+func imageBoxes(imgs []imageRef, logf func(string, ...any)) []*cssbox.Box {
+	var out []*cssbox.Box
+	for _, im := range imgs {
+		if b := lowerImage(im, logf); b != nil {
+			out = append(out, b)
+		}
+	}
+	return out
 }

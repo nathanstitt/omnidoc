@@ -30,6 +30,7 @@ import (
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/content"
 	"github.com/nathanstitt/omnidoc/pkg/internal/pageres"
+	"github.com/nathanstitt/omnidoc/pkg/internal/raster"
 	"github.com/nathanstitt/omnidoc/pkg/internal/render"
 	"github.com/nathanstitt/omnidoc/pkg/pdf"
 )
@@ -70,6 +71,7 @@ type rule struct {
 type pageContent struct {
 	glyphs []glyph
 	rules  []rule
+	images []imageRef
 	width  float64 // page width in device units
 	height float64 // page height in device units
 }
@@ -97,6 +99,7 @@ const (
 type collector struct {
 	glyphs []glyph
 	rules  []rule
+	images []imageRef
 }
 
 // text is the TextSink: it records one shown glyph. A glyph with rune 0 (a font
@@ -264,20 +267,36 @@ func subpathBounds(p *render.Path) []bounds {
 // records nothing.
 type nullDevice struct {
 	w, h int
+	c    *collector // receives DrawImage calls; nil discards them
+
+	// clip is the bounding box of the active clip path(s); clipStack holds the
+	// boxes Save has pushed. Only images consult it (to crop to what is visible).
+	clip      clipBox
+	clipStack []clipBox
 }
 
-func (d *nullDevice) Size() (int, int)                                             { return d.w, d.h }
-func (d *nullDevice) Fill(*render.Path, render.FillPaint)                          {}
-func (d *nullDevice) Stroke(*render.Path, render.StrokePaint)                      {}
-func (d *nullDevice) DrawImage(image.Image, render.Matrix, float64, string)        {}
-func (d *nullDevice) FillGlyph(*render.Path, render.FillColor, string)             {}
-func (d *nullDevice) DrawGlyph(render.GlyphRef)                                    {}
-func (d *nullDevice) FillShading(render.Shader, render.Matrix, string)             {}
-func (d *nullDevice) PushClip(*render.Path, render.FillRule)                       {}
+func (d *nullDevice) Size() (int, int)                        { return d.w, d.h }
+func (d *nullDevice) Fill(*render.Path, render.FillPaint)     {}
+func (d *nullDevice) Stroke(*render.Path, render.StrokePaint) {}
+func (d *nullDevice) DrawImage(img image.Image, ctm render.Matrix, alpha float64, _ string) {
+	if d.c != nil {
+		d.c.image(img, ctm, alpha, d.clip)
+	}
+}
+func (d *nullDevice) FillGlyph(*render.Path, render.FillColor, string) {}
+func (d *nullDevice) DrawGlyph(render.GlyphRef)                        {}
+func (d *nullDevice) FillShading(render.Shader, render.Matrix, string) {}
+func (d *nullDevice) PushClip(p *render.Path, _ render.FillRule) {
+	d.clip = d.clip.intersect(boundsOf(p))
+}
 func (d *nullDevice) BeginGroup()                                                  {}
 func (d *nullDevice) EndGroup(float64, string, render.GroupMask, render.GroupMask) {}
-func (d *nullDevice) Save()                                                        {}
-func (d *nullDevice) Restore()                                                     {}
+func (d *nullDevice) Save()                                                        { d.clipStack = append(d.clipStack, d.clip) }
+func (d *nullDevice) Restore() {
+	if n := len(d.clipStack); n > 0 {
+		d.clip, d.clipStack = d.clipStack[n-1], d.clipStack[:n-1]
+	}
+}
 func (d *nullDevice) BuildClipMask([]render.MaskPath) render.GroupMask {
 	return image.NewAlpha(image.Rectangle{})
 }
@@ -322,6 +341,7 @@ func Collect(doc *pdf.Document, pageIndex int, logf func(string, ...any)) (pc *p
 			}
 			pc.glyphs = c.glyphs
 			pc.rules = c.rules
+			pc.images = c.images
 			err = nil
 		}
 	}()
@@ -340,7 +360,7 @@ func Collect(doc *pdf.Document, pageIndex int, logf func(string, ...any)) (pc *p
 	// reading order (top-to-bottom) matches human reading, honoring /Rotate.
 	base := pageExtractMatrix(pg)
 	res := &pageResources{doc: pg.Doc(), dict: pg.Resources, logf: logf}
-	interp := content.New(pg.Doc(), &nullDevice{w: int(math.Ceil(wpt)), h: int(math.Ceil(hpt))}, res, base, content.Options{
+	interp := content.New(pg.Doc(), &nullDevice{w: int(math.Ceil(wpt)), h: int(math.Ceil(hpt)), c: c}, res, base, content.Options{
 		Logf:         logf,
 		MaxOps:       5_000_000,
 		TextSink:     c.text,
@@ -353,6 +373,7 @@ func Collect(doc *pdf.Document, pageIndex int, logf func(string, ...any)) (pc *p
 	}
 	pc.glyphs = c.glyphs
 	pc.rules = c.rules
+	pc.images = c.images
 	return pc, nil
 }
 
@@ -386,9 +407,10 @@ func minmax(a, b float64) (float64, float64) {
 
 // pageResources is the extractor's content.Resources implementation. Font and
 // Form delegate to pkg/pdf/pageres, shared with the raster backend. Only those
-// two matter for text/rule capture — images, shadings, and patterns paint into
-// the nullDevice and are irrelevant to structure — so those return "unresolved",
-// which the interpreter handles gracefully (it skips the op).
+// two matter for text/rule capture, plus Image and InlineImage for picture
+// capture. Shadings and patterns paint into the nullDevice and are irrelevant to
+// structure, so those return "unresolved", which the interpreter handles
+// gracefully (it skips the op).
 type pageResources struct {
 	doc  *pdf.Document
 	dict pdf.Dict
@@ -420,12 +442,15 @@ func (r *pageResources) Form(name string) ([]byte, content.Resources, render.Mat
 	return data, child, m, bbox, isGroup, true
 }
 
-// Image reports "not an image" — the extractor discards raster content.
-func (r *pageResources) Image(string, render.FillColor) (image.Image, bool) { return nil, false }
+// Image decodes an image XObject through the rasterizer's decoder, so the
+// extractor sees the same pixels a viewer paints.
+func (r *pageResources) Image(name string, fill render.FillColor) (image.Image, bool) {
+	return raster.ResolveImage(r.doc, r.dict, name, fill, r.logf)
+}
 
-// InlineImage reports "cannot decode" — inline images are irrelevant to structure.
-func (r *pageResources) InlineImage(pdf.Dict, []byte, render.FillColor) (image.Image, bool) {
-	return nil, false
+// InlineImage decodes a BI...ID...EI inline image the same way.
+func (r *pageResources) InlineImage(dict pdf.Dict, data []byte, fill render.FillColor) (image.Image, bool) {
+	return raster.ResolveInlineImage(r.doc, dict, data, fill, r.logf)
 }
 
 // Shading reports "absent": shadings paint gradients we do not extract.

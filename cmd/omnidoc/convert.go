@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"image"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
@@ -58,6 +59,9 @@ func convertCmd(args []string) error {
 
 		// md/txt output
 		plain = fs.Bool("plain", false, "emit plain text instead of Markdown (md output)")
+
+		// md/html output
+		imagesDir = fs.String("images-dir", "", "save embedded images as files in this directory and link them, instead of inlining data: URIs (md and html output; the links are relative to the output file)")
 
 		// html output
 		fragment = fs.Bool("fragment", false, "emit only body markup, no <html>/<head> wrapper (html output)")
@@ -168,6 +172,14 @@ func convertCmd(args []string) error {
 		return renderPages(doc, indices, output, imgOpts)
 	}
 
+	var imgDir, imgRef string
+	if *imagesDir != "" {
+		if toFormat != omnidoc.FormatMarkdown && toFormat != omnidoc.FormatHTML {
+			return fmt.Errorf("--images-dir applies to md and html output, not %s", toFormat)
+		}
+		imgDir, imgRef = *imagesDir, imageLinkPrefix(*imagesDir, output)
+	}
+
 	// Validate the pair before creating the output, so a rejected conversion
 	// (e.g. same-format) leaves no empty file behind.
 	if err := omnidoc.CanConvert(doc.Format(), toFormat); err != nil {
@@ -195,8 +207,8 @@ func convertCmd(args []string) error {
 			PageHeightPt: *pageH,
 			MarginPt:     marginPt,
 		},
-		Markdown:     omnidoc.MarkdownOptions{Plain: *plain},
-		HTMLOut:      omnidoc.HTMLWriteOptions{Fragment: *fragment},
+		Markdown:     omnidoc.MarkdownOptions{Plain: *plain, ImageDir: imgDir, ImageRef: imgRef},
+		HTMLOut:      omnidoc.HTMLWriteOptions{Fragment: *fragment, ImageDir: imgDir, ImageRef: imgRef},
 		BundledFonts: *bundledFonts,
 	}
 
@@ -210,6 +222,19 @@ func convertCmd(args []string) error {
 		w = f
 	}
 	return doc.Write(context.Background(), w, toFormat, opts)
+}
+
+// imageLinkPrefix is the link prefix for images saved in dir: dir relative to the
+// output file's directory, with forward slashes, so the links resolve wherever
+// the pair is moved together. Writing to stdout (or a dir with no relative path)
+// links by dir as given.
+func imageLinkPrefix(dir, output string) string {
+	if output != "-" {
+		if rel, err := filepath.Rel(filepath.Dir(output), dir); err == nil {
+			return filepath.ToSlash(rel)
+		}
+	}
+	return filepath.ToSlash(dir)
 }
 
 // resolveTargetFormat resolves the output format from the --to override or the
@@ -416,4 +441,5 @@ var convertValueFlags = map[string]bool{
 	"-page": true, "--page": true,
 	"-pages": true, "--pages": true,
 	"-sheet": true, "--sheet": true,
+	"-images-dir": true, "--images-dir": true,
 }

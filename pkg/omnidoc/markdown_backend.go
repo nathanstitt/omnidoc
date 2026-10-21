@@ -20,13 +20,22 @@ type MarkdownOptions struct {
 	// completes, cheaply). 0 (the default) writes everything. Built for search-index
 	// extraction ("the first 50 KB of text").
 	MaxBytes int
+	// ImageDir, when non-empty, saves each embedded (data:) image as a file in this
+	// directory and references the file instead of inlining the bytes. The
+	// directory is created on the first image. Other image references are left
+	// as they are. See ImageRef for what the written reference looks like.
+	ImageDir string
+	// ImageRef is the prefix written before a saved image's file name, e.g.
+	// "report_images" gives "![](report_images/3fa9c1.png)". Default: the base
+	// name of ImageDir. Only used with ImageDir.
+	ImageRef string
 	// Logf receives degradation diagnostics (e.g. a table with a synthesized header
 	// row). nil -> no-op.
 	Logf func(string, ...any)
 }
 
 func (o MarkdownOptions) toWriterOptions() markdownwrite.Options {
-	return markdownwrite.Options{Plain: o.Plain, Logf: o.Logf}
+	return markdownwrite.Options{Plain: o.Plain, ImageSrc: newImageExporter(o.ImageDir, o.ImageRef, o.Logf).src, Logf: o.Logf}
 }
 
 // WriteMarkdown writes an opened document to out as GitHub-Flavored Markdown. It

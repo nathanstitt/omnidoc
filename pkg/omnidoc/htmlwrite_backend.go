@@ -13,12 +13,19 @@ type HTMLWriteOptions struct {
 	// Fragment, when true, emits only the body markup (no <!DOCTYPE>/<html>/<head>
 	// wrapper), for embedding. Default false (a complete document).
 	Fragment bool
+	// ImageDir saves each embedded (data:) image as a file in this directory and
+	// references the file instead of inlining the bytes. The directory is created
+	// on the first image. Other image references are left as they are.
+	ImageDir string
+	// ImageRef is the prefix written before a saved image's file name. Default:
+	// the base name of ImageDir. Only used with ImageDir.
+	ImageRef string
 	// Logf receives degradation diagnostics (nil -> no-op).
 	Logf func(string, ...any)
 }
 
 func (o HTMLWriteOptions) toWriterOptions() htmlwrite.Options {
-	return htmlwrite.Options{Fragment: o.Fragment, Logf: o.Logf}
+	return htmlwrite.Options{Fragment: o.Fragment, ImageSrc: newImageExporter(o.ImageDir, o.ImageRef, o.Logf).src, Logf: o.Logf}
 }
 
 // WriteHTML writes an opened document to out as HTML. It works on any document that can

@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/nathanstitt/omnidoc/actions/workflows/ci.yml/badge.svg)](https://github.com/nathanstitt/omnidoc/actions/workflows/ci.yml)
 [![Go Reference](https://pkg.go.dev/badge/github.com/nathanstitt/omnidoc.svg)](https://pkg.go.dev/github.com/nathanstitt/omnidoc/pkg/omnidoc)
-[![Go 1.25](https://img.shields.io/badge/Go-1.25-00758d?labelColor=211c17)](go.mod)
+[![Go 1.26](https://img.shields.io/badge/Go-1.26-00758d?labelColor=211c17)](go.mod)
 [![CGo free](https://img.shields.io/badge/CGo-none-c8401a?labelColor=211c17)](#why)
 [![MIT](https://img.shields.io/badge/license-MIT-c8401a?labelColor=211c17)](LICENSE)
 
