@@ -17,8 +17,19 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
   are not merged or released. Each item stays ◐ until a release contains it.
 - Each item has a **Built:** note where the API differs from the proposal.
 - Tests use synthetic fixtures with the same XML shapes as the reference file. The real-world
-  corpus covers autoFilter and hyperlinks. `workers-comp.xlsx` was not available. Send it to the
-  omnidoc team so the pivot and font facts can be checked against the real Google Sheets export.
+  corpus covers autoFilter and hyperlinks.
+- Items 1, 2, 4, and 5 were checked against the anonymized reference export
+  (`calc/tests/assets/google-export.xlsx`):
+  - Gridlines are off on sheets 2 and 3.
+  - The autoFilter is `A1:BY35` and the frozen pane is 1×2.
+  - The default font is Arial 10, and no cell font is left without a size.
+  - The `x="-2"` placeholder reads as `ValuesAxis "col"`.
+  - `numFmtId="164"` resolves to `"$"#,##0.00`.
+  - C34 is 7800.87 and BC34 is 420323.55.
+- The check found one more gap, now fixed. A pivot re-add wrote 20 cache fields all named `" "`,
+  and it named date headers `FieldN`. The new `PivotTable.CacheFields` keeps the cache names on
+  re-add.
+- The file is not yet committed to omnidoc testdata. Its license must be decided first.
 - Added on the omnidoc side, which calc can use:
   - Writing back an unchanged fact (gridlines, autoFilter, hyperlinks) leaves the sheet part
     byte-identical. calc can push every sheet's facts on every save.
@@ -117,6 +128,21 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
     plus 5 px, rounded up to a multiple of 8 px as Excel does. Calibri 11 / Arial 10 → 9.140625.
 
 ---
+
+## 7. Sheet-local names after a sheet move
+
+- ◐ **`MoveSheet` keeps `localSheetId` on its sheet.** Covered by PR #176 (`DeleteSheet` too).
+
+## 8. Write the sheet defaults
+
+- ☐ **`SheetEdit.SetDefaultRowHeight(pt)` / `SetDefaultColWidth(chars)`.** Write
+  `<sheetFormatPr>`. calc reads the defaults on import but cannot save a change. Not started.
+
+## 9. 1904 date system
+
+- ☐ **A `KindDate` formula cache in a 1904 workbook is a 1904-system serial.** calc's formula
+  engine is 1900-based. Either convert, or document `Workbook.Date1904` as the switch that callers
+  apply to `Value.F`. Not started.
 
 ## Notes for later items
 

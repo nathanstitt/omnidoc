@@ -24,6 +24,15 @@ type PivotTable struct {
 	// TargetSheet/Location place the pivot (Location is the anchor range).
 	TargetSheet string
 	Location    string
+	// CacheFields are the cache's field names, one per source column in
+	// order — the names Rows, Cols, Filters, Values, and AxisSort use. A read
+	// fills them from the cache, so a re-add keeps the producer's names
+	// ("12/6/24" for a date header, " 2" for a repeated one). On write, nil
+	// derives them from the header row's display text, where a date reads in
+	// ISO form ("2024-12-06") like Cell.Text and repeats are numbered " ",
+	// " 2", ... A non-nil list is used verbatim and must name every source
+	// column exactly once.
+	CacheFields []string
 	// Rows/Cols/Filters are the axis fields by source-column name.
 	Rows, Cols, Filters []string
 	// Values are the aggregated data fields.
@@ -265,6 +274,7 @@ func (f *File) readPivotTable(partName, targetSheet string) (PivotTable, bool) {
 				for _, cf := range cache.Fields.Field {
 					fields = append(fields, cf.Name)
 				}
+				pt.CacheFields = fields
 			}
 		}
 	}
@@ -462,13 +472,36 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 		return fmt.Errorf("xlsx: pivot table %q needs a target location", pt.Name)
 	}
 
-	// Field names from the header row.
+	// Field names from the header row: each cell's display text (a date
+	// header uses the reader's Cell.Text rule). Cache field names must be
+	// unique, so, left to right, a repeat gets the lowest count from 2 that
+	// makes it unique appended — " ", " 2", " 3", as Excel and Google Sheets
+	// number repeats.
 	var fields []string
 	fieldIdx := map[string]int{}
-	for col := srcRange.StartCol; col <= srcRange.EndCol; col++ {
-		name := src.Cell(srcRange.StartRow, col).Value.S
+	if pt.CacheFields != nil {
+		if width := srcRange.EndCol - srcRange.StartCol + 1; len(pt.CacheFields) != width {
+			return fmt.Errorf("xlsx: pivot %q has %d cache field names for %d source columns", pt.Name, len(pt.CacheFields), width)
+		}
+		for i, name := range pt.CacheFields {
+			if _, dup := fieldIdx[name]; dup {
+				return fmt.Errorf("xlsx: pivot %q cache field name %q is not unique", pt.Name, name)
+			}
+			fieldIdx[name] = i
+		}
+		fields = pt.CacheFields
+	}
+	for col := srcRange.StartCol; pt.CacheFields == nil && col <= srcRange.EndCol; col++ {
+		name := src.headerText(srcRange.StartRow, col)
 		if name == "" {
 			name = "Field" + strconv.Itoa(col-srcRange.StartCol+1)
+		}
+		base := name
+		for k := 2; ; k++ {
+			if _, taken := fieldIdx[name]; !taken {
+				break
+			}
+			name = base + strconv.Itoa(k)
 		}
 		fieldIdx[name] = len(fields)
 		fields = append(fields, name)
@@ -782,6 +815,26 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 	addOverride(recsPart, ctPivotCacheRecs)
 	addOverride(tablePart, ctPivotTable)
 	return nil
+}
+
+// headerText is a pivot source header cell's display text: strings and
+// errors as stored, booleans as TRUE/FALSE, numbers and dates through the
+// cell's number format (the reader's Cell.Text rule).
+func (s *SheetEdit) headerText(row, col int) string {
+	cd := s.Cell(row, col)
+	switch cd.Value.Kind {
+	case KindEmpty:
+		return ""
+	case KindString, KindError:
+		return cd.Value.S
+	case KindBool:
+		if cd.Value.B {
+			return "TRUE"
+		}
+		return "FALSE"
+	}
+	raw := rawCell{value: strconv.FormatFloat(cd.Value.F, 'g', -1, 64), styleIdx: cd.StyleID}
+	return displayValue(raw, nil, s.file.resolvedStyles(), s.file.Date1904())
 }
 
 // registerPivotCache adds a workbook pivotCaches entry (allocating the next

@@ -54,7 +54,8 @@ func calcPivotFixture() []byte {
 func wantCalcPivot() PivotTable {
 	return PivotTable{
 		Name: "Comp", SourceSheet: "Data", SourceRange: "A1:D2", TargetSheet: "Pivot", Location: "A3:E9",
-		Rows: []string{"Region"}, Cols: []string{"Product"},
+		CacheFields: []string{"Region", "Product", "Sales", "Margin"},
+		Rows:        []string{"Region"}, Cols: []string{"Product"},
 		Values: []PivotValueField{
 			{Field: "Sales", Aggregation: "sum", DisplayName: "Sum of Sales", NumFmt: `"$"#,##0.00`},
 			{Field: "Margin", Aggregation: "average", DisplayName: "Avg Margin", NumFmt: "0.00%"},
@@ -223,4 +224,61 @@ func pivotFixtureWithTable(table string) []byte {
 		panic(err)
 	}
 	return out
+}
+
+// TestPivotCacheFieldNames: without CacheFields, repeated header text gets
+// the next free count appended (" ", " 2", " 3" — Excel's and Google's rule)
+// and a date header is named by its display text; CacheFields from a read is
+// written back verbatim, and a list that does not fit the source is refused.
+func TestPivotCacheFieldNames(t *testing.T) {
+	src := wsOpen + `<sheetData><row r="1">` +
+		`<c r="A1" t="inlineStr"><is><t>K</t></is></c><c r="B1" t="inlineStr"><is><t> </t></is></c>` +
+		`<c r="C1" t="inlineStr"><is><t> </t></is></c><c r="D1" t="inlineStr"><is><t> 2</t></is></c>` +
+		`<c r="E1" s="1"><v>45632</v></c></row>` +
+		`<row r="2"><c r="A2" t="inlineStr"><is><t>a</t></is></c><c r="E2"><v>1</v></c></row></sheetData></worksheet>`
+	styles := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="165" formatCode="m/d/yy"/></numFmts><fonts count="1"><font><sz val="10"/><name val="Arial"/></font></fonts><cellXfs count="2"><xf fontId="0"/><xf numFmtId="165" fontId="0"/></cellXfs></styleSheet>`
+	data := genxlsx.New().AddSheet("S", src).AddSheet("P", wsOpen+`<sheetData/></worksheet>`).SetStyles(styles).Bytes()
+	base := PivotTable{Name: "p", SourceSheet: "S", SourceRange: "A1:E2", TargetSheet: "P", Location: "A1",
+		Rows: []string{"K"}, Values: []PivotValueField{{Field: "2024-12-06"}}}
+
+	f, err := Edit(context.Background(), data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.AddPivotTable(base); err != nil {
+		t.Fatal(err)
+	}
+	f2, _ := Edit(context.Background(), mustSave(t, f))
+	read := f2.PivotTables()[0]
+	// Left to right: the second " " takes " 2", so the header that is
+	// literally " 2" moves on to " 22".
+	if want := []string{"K", " ", " 2", " 22", "2024-12-06"}; !reflect.DeepEqual(read.CacheFields, want) {
+		t.Errorf("derived names = %q, want %q", read.CacheFields, want)
+	}
+
+	// A producer's own names (Google's "12/6/24") survive remove-then-add.
+	named := base
+	named.CacheFields = []string{"K", " ", " 2", " 3", "12/6/24"}
+	named.Values = []PivotValueField{{Field: "12/6/24"}}
+	f3, _ := Edit(context.Background(), data)
+	if err := f3.AddPivotTable(named); err != nil {
+		t.Fatal(err)
+	}
+	f4, _ := Edit(context.Background(), mustSave(t, f3))
+	if got := f4.PivotTables()[0]; !reflect.DeepEqual(got.CacheFields, named.CacheFields) || got.Values[0].Field != "12/6/24" {
+		t.Errorf("verbatim names = %q, value %q", got.CacheFields, got.Values[0].Field)
+	}
+
+	for name, bad := range map[string][]string{
+		"short":     {"K", " "},
+		"duplicate": {"K", " ", " ", " 3", "x"},
+	} {
+		pt := base
+		pt.CacheFields = bad
+		f5, _ := Edit(context.Background(), data)
+		if err := f5.AddPivotTable(pt); err == nil {
+			t.Errorf("%s CacheFields accepted", name)
+		}
+	}
 }

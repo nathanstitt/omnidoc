@@ -1290,6 +1290,13 @@ dependency is `x/image`, so no new transitive surface):
   `sortType` ascending/descending per axis field. `LocationInfo` carries the `<location>` offsets
   and page counts. The data, row-header, column-header, grand-total, missing, and error captions
   (with `showMissing`/`showError`) round-trip too. A bad axis or sort name is a hard error.
+- `PivotTable.CacheFields` keeps the cache's field names. A read fills them, and `AddPivotTable`
+  writes them back verbatim, so a re-add keeps the producer's names: Google's `12/6/24` for a date
+  header, and `" "`, `" 2"` for repeats. Without them, the header row's display text names the
+  fields, and a numeric header is no longer an anonymous `FieldN`. Repeats are numbered left to
+  right, so cache names stay unique. Before this, a source with 20 blank-looking headers wrote 20
+  cache fields named `" "`. Checked against calc's real Google Sheets export: both pivots survive
+  remove-then-add with every cache name unchanged.
 
 **XLSX sheet view, autoFilter, hyperlinks, default font** (`pkg/xlsx`, requested by tinycld calc):
 
