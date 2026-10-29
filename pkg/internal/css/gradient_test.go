@@ -72,12 +72,12 @@ func TestParseGradientRejects(t *testing.T) {
 		"none",
 		"url(x.png)",
 		"linear-gradient()",
-		"linear-gradient(red)",                      // fewer than two stops
-		"linear-gradient(to right, red)",            // direction plus one stop
-		"linear-gradient(45, red, blue)",            // unitless number is not an <angle>
-		"linear-gradient(45px, red, blue)",          // a length is not an <angle>
-		"linear-gradient(to, red, blue)",            // dangling `to`
-		"linear-gradient(to up, red, blue)",         // not a side keyword
+		"linear-gradient(red)",              // fewer than two stops
+		"linear-gradient(to right, red)",    // direction plus one stop
+		"linear-gradient(45, red, blue)",    // unitless number is not an <angle>
+		"linear-gradient(45px, red, blue)",  // a length is not an <angle>
+		"linear-gradient(to, red, blue)",    // dangling `to`
+		"linear-gradient(to up, red, blue)", // not a side keyword
 		"linear-gradient(to left right, red, blue)", // two keywords on one axis
 		"linear-gradient(to top bottom, red, blue)",
 		"linear-gradient(to top left bottom, red, blue)",
