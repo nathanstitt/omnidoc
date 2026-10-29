@@ -10,9 +10,22 @@ found later are added at the end of this file.
 
 Status legend: ☐ open · ◐ in progress · ☑ done (released in version …).
 
-All items below are implemented on branch `xlsx-calc-requests` (not yet released). Each item has
-a **Built:** note where the API differs from the proposal. The reference file `workers-comp.xlsx`
-was not available, so the tests use synthetic fixtures with the same XML shapes.
+## Status (2026-10-29)
+
+- All items are implemented and in review in
+  [PR #176](https://github.com/nathanstitt/omnidoc/pull/176) (branch `xlsx-calc-requests`). They
+  are not merged or released. Each item stays ◐ until a release contains it.
+- Each item has a **Built:** note where the API differs from the proposal.
+- Tests use synthetic fixtures with the same XML shapes as the reference file. The real-world
+  corpus covers autoFilter and hyperlinks. `workers-comp.xlsx` was not available. Send it to the
+  omnidoc team so the pivot and font facts can be checked against the real Google Sheets export.
+- Added on the omnidoc side, which calc can use:
+  - Writing back an unchanged fact (gridlines, autoFilter, hyperlinks) leaves the sheet part
+    byte-identical. calc can push every sheet's facts on every save.
+  - `MoveSheet`/`DeleteSheet` keep sheet-local defined names (such as `_FilterDatabase`) on their
+    sheet.
+- Known gap: `SetName` does not rewrite the old sheet name in formulas or defined names (omnidoc
+  backlog X1). After calc renames a sheet, its `_FilterDatabase` name keeps the old sheet name.
 
 ---
 
