@@ -295,3 +295,27 @@ func containsAny(s string, subs ...string) bool {
 	}
 	return false
 }
+
+// date1904Offset is the distance between the date systems: 1904-01-01, day 0
+// of the 1904 system, is serial 1462 in the 1900 system (which counts
+// Excel's fictitious 1900-02-29).
+const date1904Offset = 1462
+
+// Serial1900 converts a serial from a workbook's date system to the 1900
+// system: it adds 1462 days when date1904 is set and returns the serial
+// unchanged otherwise. The time-of-day fraction is kept.
+func Serial1900(serial float64, date1904 bool) float64 {
+	if date1904 {
+		return serial + date1904Offset
+	}
+	return serial
+}
+
+// SerialFrom1900 converts a 1900-system serial to a workbook's date system
+// (the inverse of Serial1900).
+func SerialFrom1900(serial float64, date1904 bool) float64 {
+	if date1904 {
+		return serial - date1904Offset
+	}
+	return serial
+}

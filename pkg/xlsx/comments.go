@@ -195,43 +195,13 @@ func (s *SheetEdit) ensureCommentParts() (commentsPart, vmlPart string, err erro
 	vmlPart = fmt.Sprintf("xl/drawings/vmlDrawing%d.vml", v)
 
 	// Sheet rels: add (or create) with the two relationships.
-	relsName := sheetRelsName(s.partName)
-	if !s.file.partExists(relsName) {
-		s.file.added[relsName] = []byte(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-</Relationships>
-`)
-	}
-	rels, err := s.file.mutatePart(relsName)
+	vmlRelID, err := s.addSheetRel(relVMLDrawing, vmlPart)
 	if err != nil {
 		return "", "", err
 	}
-	maxRel := 0
-	for _, ch := range xmlpart.Children(rels.Root(), "Relationship") {
-		id := ch.SelectAttrValue("Id", "")
-		if strings.HasPrefix(id, "rId") {
-			if num, err := strconv.Atoi(id[3:]); err == nil && num > maxRel {
-				maxRel = num
-			}
-		}
+	if _, err := s.addSheetRel(relComments, commentsPart); err != nil {
+		return "", "", err
 	}
-	relFromSheet := func(target string) string {
-		rel, err := relPath(path.Dir(s.partName), target)
-		if err != nil {
-			return target
-		}
-		return rel
-	}
-	addRel := func(id, relType, target string) {
-		el := etree.NewElement("Relationship")
-		el.CreateAttr("Id", id)
-		el.CreateAttr("Type", relType)
-		el.CreateAttr("Target", relFromSheet(target))
-		rels.Root().AddChild(el)
-	}
-	vmlRelID := fmt.Sprintf("rId%d", maxRel+1)
-	addRel(vmlRelID, relVMLDrawing, vmlPart)
-	addRel(fmt.Sprintf("rId%d", maxRel+2), relComments, commentsPart)
 
 	// Content types: an Override for the comments part; a Default for .vml.
 	ct, err := s.file.mutatePart("[Content_Types].xml")
@@ -260,8 +230,9 @@ func (s *SheetEdit) ensureCommentParts() (commentsPart, vmlPart string, err erro
 	if err != nil {
 		return "", "", err
 	}
+	attr := relIDAttr(root)
 	ld := xmlpart.EnsureChildInOrder(root, "legacyDrawing", worksheetOrder)
-	ld.CreateAttr("r:id", vmlRelID)
+	ld.CreateAttr(attr, vmlRelID)
 	return commentsPart, vmlPart, nil
 }
 

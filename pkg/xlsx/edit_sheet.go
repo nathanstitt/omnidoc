@@ -67,10 +67,82 @@ func (s *SheetEdit) SetName(name string) error {
 	}
 	el.CreateAttr("name", name)
 	s.file.dirty["xl/workbook.xml"] = true
+	s.file.renameLocalBuiltinNames(s.name, name)
 	delete(s.file.sheets, s.name)
 	s.name = name
 	s.file.sheets[name] = s
 	return nil
+}
+
+// renameLocalBuiltinNames rewrites the sheet references in the renamed
+// sheet's own built-in names (_xlnm._FilterDatabase, _xlnm.Print_Area,
+// _xlnm.Print_Titles, ...), which point at that sheet by name, so they keep
+// pointing at it. Other formulas and names keep the old name (backlog X1).
+func (f *File) renameLocalBuiltinNames(oldName, newName string) {
+	idx, err := f.sheetIndex(newName)
+	if err != nil {
+		return
+	}
+	wb, err := f.part("xl/workbook.xml")
+	if err != nil {
+		return
+	}
+	dn := xmlpart.FindChild(wb.Root(), "definedNames")
+	if dn == nil {
+		return
+	}
+	for _, el := range xmlpart.Children(dn, "definedName") {
+		if !strings.HasPrefix(el.SelectAttrValue("name", ""), "_xlnm.") ||
+			el.SelectAttrValue("localSheetId", "") != strconv.Itoa(idx) {
+			continue
+		}
+		if text := el.Text(); text != "" {
+			if renamed := renameSheetRefs(text, oldName, newName); renamed != text {
+				el.SetText(renamed)
+			}
+		}
+	}
+}
+
+// renameSheetRefs rewrites every reference to sheet oldName in a formula
+// ("old!A1", "'old name'!A1") to newName, quoted as needed. A match must
+// start a reference — at the start or after an operator, comma, paren, or
+// space — so "Data" does not match inside "MyData!A1", and text inside
+// string literals is left alone.
+func renameSheetRefs(formula, oldName, newName string) string {
+	forms := []string{"'" + strings.ReplaceAll(oldName, "'", "''") + "'!"}
+	if q := quoteSheetName(oldName); !strings.HasPrefix(q, "'") {
+		forms = append(forms, q+"!")
+	}
+	repl := quoteSheetName(newName) + "!"
+	var sb strings.Builder
+	inString := false
+	for i := 0; i < len(formula); {
+		ch := formula[i]
+		if ch == '"' {
+			inString = !inString
+			sb.WriteByte(ch)
+			i++
+			continue
+		}
+		if !inString && (i == 0 || strings.IndexByte(",;( =+-*/&^<>:", formula[i-1]) >= 0) {
+			matched := false
+			for _, form := range forms {
+				if len(formula)-i >= len(form) && strings.EqualFold(formula[i:i+len(form)], form) {
+					sb.WriteString(repl)
+					i += len(form)
+					matched = true
+					break
+				}
+			}
+			if matched {
+				continue
+			}
+		}
+		sb.WriteByte(ch)
+		i++
+	}
+	return sb.String()
 }
 
 // Visibility reports the sheet's view state.
@@ -206,6 +278,175 @@ func (s *SheetEdit) SetFrozen(rows, cols int) {
 	pane.CreateAttr("state", "frozen")
 	// pane is sheetView's first child element in the schema.
 	view.InsertChildAt(0, pane)
+}
+
+// ShowGridLines reports the first sheetView's showGridLines flag (true when
+// the attribute or the view is absent — the OOXML default).
+func (s *SheetEdit) ShowGridLines() bool {
+	root, err := s.doc()
+	if err != nil {
+		return true
+	}
+	if views := xmlpart.FindChild(root, "sheetViews"); views != nil {
+		if view := xmlpart.FindChild(views, "sheetView"); view != nil {
+			return onOffDefault(view.SelectAttrValue("showGridLines", ""), true)
+		}
+	}
+	return true
+}
+
+// SetShowGridLines shows or hides the sheet's gridlines on every sheetView.
+// Hiding writes showGridLines="0" (creating the view when the sheet has
+// none); showing removes the attribute, restoring the default. Every other
+// sheetView attribute and child (pane, selection) is kept. A call that
+// changes nothing leaves the part untouched.
+func (s *SheetEdit) SetShowGridLines(show bool) {
+	if s.gridLinesUniform(show) {
+		return
+	}
+	root, err := s.mut()
+	if err != nil {
+		return
+	}
+	views := xmlpart.EnsureChildInOrder(root, "sheetViews", worksheetOrder)
+	if len(xmlpart.Children(views, "sheetView")) == 0 {
+		view := etree.NewElement("sheetView")
+		view.CreateAttr("workbookViewId", "0")
+		views.AddChild(view)
+	}
+	for _, view := range xmlpart.Children(views, "sheetView") {
+		if show {
+			view.RemoveAttr("showGridLines")
+		} else {
+			view.CreateAttr("showGridLines", "0")
+		}
+	}
+}
+
+// gridLinesUniform reports whether every sheetView already matches show.
+func (s *SheetEdit) gridLinesUniform(show bool) bool {
+	root, err := s.doc()
+	if err != nil {
+		return false
+	}
+	var list []*etree.Element
+	if views := xmlpart.FindChild(root, "sheetViews"); views != nil {
+		list = xmlpart.Children(views, "sheetView")
+	}
+	if len(list) == 0 {
+		return show // no view reads as shown; hiding must create one
+	}
+	for _, view := range list {
+		if onOffDefault(view.SelectAttrValue("showGridLines", ""), true) != show {
+			return false
+		}
+	}
+	return true
+}
+
+// Excel's limits on the sheet default sizes.
+const (
+	maxRowHeightPt   = 409
+	maxColWidthChars = 255
+)
+
+// DefaultRowHeight reads the sheetFormatPr defaultRowHeight in points, or 0
+// when the sheet declares none (the same value as Sheet.DefaultRowHeight).
+func (s *SheetEdit) DefaultRowHeight() float64 {
+	root, err := s.doc()
+	if err != nil {
+		return 0
+	}
+	if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil {
+		if v, err := strconv.ParseFloat(pr.SelectAttrValue("defaultRowHeight", ""), 64); err == nil {
+			return v
+		}
+	}
+	return 0
+}
+
+// DefaultColWidth reads the default column width in characters: the
+// declared defaultColWidth, else the width derived from baseColWidth and the
+// workbook default font (the same value as Sheet.DefaultColWidth).
+func (s *SheetEdit) DefaultColWidth() float64 {
+	base := defaultBaseColWidth
+	if root, err := s.doc(); err == nil {
+		if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil {
+			if w, err := strconv.ParseFloat(pr.SelectAttrValue("defaultColWidth", ""), 64); err == nil && w > 0 {
+				return w
+			}
+			if n, err := strconv.Atoi(pr.SelectAttrValue("baseColWidth", "")); err == nil && n >= 0 && n <= 255 {
+				base = n
+			}
+		}
+	}
+	return derivedDefaultColWidth(base, s.file.DefaultFont())
+}
+
+// SetDefaultRowHeight sets the sheet's default row height in points (0 < pt
+// <= 409). It writes sheetFormatPr defaultRowHeight with customHeight="1",
+// which marks the height as set by hand, as Excel does. Every other
+// sheetFormatPr attribute is kept; an unchanged height leaves the part
+// untouched.
+func (s *SheetEdit) SetDefaultRowHeight(pt float64) error {
+	if !(pt > 0 && pt <= maxRowHeightPt) {
+		return fmt.Errorf("xlsx: default row height %v pt is outside (0, %d]", pt, maxRowHeightPt)
+	}
+	if s.DefaultRowHeight() == pt {
+		if root, err := s.doc(); err == nil {
+			if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil && onOff(pr.SelectAttrValue("customHeight", "")) {
+				return nil
+			}
+		}
+	}
+	pr, err := s.sheetFormatPr()
+	if err != nil {
+		return err
+	}
+	pr.CreateAttr("defaultRowHeight", trimFloat(pt))
+	pr.CreateAttr("customHeight", "1")
+	return nil
+}
+
+// SetDefaultColWidth sets the sheet's default column width in characters
+// (0 < chars <= 255), the unit of Sheet.DefaultColWidth and ColWidths. It
+// writes sheetFormatPr defaultColWidth, which takes precedence over
+// baseColWidth. Every other attribute is kept; an unchanged width leaves the
+// part untouched.
+func (s *SheetEdit) SetDefaultColWidth(chars float64) error {
+	if !(chars > 0 && chars <= maxColWidthChars) {
+		return fmt.Errorf("xlsx: default column width %v is outside (0, %d]", chars, maxColWidthChars)
+	}
+	if root, err := s.doc(); err == nil {
+		if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil {
+			if w, err := strconv.ParseFloat(pr.SelectAttrValue("defaultColWidth", ""), 64); err == nil && w == chars {
+				return nil
+			}
+		}
+	}
+	pr, err := s.sheetFormatPr()
+	if err != nil {
+		return err
+	}
+	pr.CreateAttr("defaultColWidth", trimFloat(chars))
+	return nil
+}
+
+// sheetFormatPr returns the sheet's <sheetFormatPr> for mutation, creating
+// it when absent. The schema requires defaultRowHeight, so a created element
+// carries Excel's default height for the workbook default font (see
+// excelDefaultRowHeight).
+func (s *SheetEdit) sheetFormatPr() (*etree.Element, error) {
+	root, err := s.mut()
+	if err != nil {
+		return nil, err
+	}
+	if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil {
+		return pr, nil
+	}
+	pr := xmlpart.EnsureChildInOrder(root, "sheetFormatPr", worksheetOrder)
+	pr.CreateAttr("defaultRowHeight", trimFloat(excelDefaultRowHeight(s.file.DefaultFont())))
+	return pr, nil
 }
 
 // activePane names the quadrant the cursor lives in after a freeze.

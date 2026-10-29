@@ -196,7 +196,9 @@ func TestPatchClears(t *testing.T) {
 	if st == nil {
 		t.Fatal("no style")
 	}
-	if st.Font.Bold || st.Font.Underline != "" || st.Font.Color.RGB != "" || st.Font.Name != "" {
+	// A cleared name drops the <name> element, so the font shows in the
+	// workbook default family (Calibri in a New workbook), as Excel does.
+	if st.Font.Bold || st.Font.Underline != "" || st.Font.Color.RGB != "" || st.Font.Name != "Calibri" {
 		t.Errorf("font not cleared: %+v", st.Font)
 	}
 	if st.Fill.Pattern != "none" && st.Fill.Pattern != "" {

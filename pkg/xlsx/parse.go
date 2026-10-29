@@ -73,7 +73,7 @@ func parseWorkbook(ctx context.Context, pkg *pkgReader) (*Workbook, error) {
 	styles := parseStyles(partOfType(pkg, wbPart, relStyles))
 	date1904 := onOff(wbDoc.Pr.Date1904)
 
-	wb := &Workbook{Date1904: date1904}
+	wb := &Workbook{Date1904: date1904, DefaultFont: styles.defaultFont}
 	for _, dn := range wbDoc.DefinedNames.DefinedName {
 		wb.DefinedNames = append(wb.DefinedNames, DefinedName{
 			Name:       dn.Name,
@@ -102,11 +102,24 @@ func parseWorkbook(ctx context.Context, pkg *pkgReader) (*Workbook, error) {
 		case "veryHidden":
 			sheet.Visibility = SheetVeryHidden
 		}
-		// Conditional formatting resolves through the raw-fidelity tree so
-		// CFRule.Raw is byte-faithful (the same code path the editor uses).
-		if bytes.Contains(data, []byte("conditionalFormatting")) {
+		// Conditional formatting, the autoFilter, and hyperlinks resolve
+		// through the raw-fidelity tree, so their Raw/Extra bytes are faithful
+		// and the editor shares the same code path. The tree is built only
+		// when the part mentions one of them.
+		hasCF := bytes.Contains(data, []byte("conditionalFormatting"))
+		hasAF := bytes.Contains(data, []byte("autoFilter"))
+		hasHL := bytes.Contains(data, []byte("hyperlinks"))
+		if hasCF || hasAF || hasHL {
 			if p, err := xmlpart.Parse(data); err == nil {
-				sheet.CondFmts = parseCF(p.Root(), styles.dxfs)
+				if hasCF {
+					sheet.CondFmts = parseCF(p.Root(), styles.dxfs)
+				}
+				if hasAF {
+					sheet.AutoFilter = parseAutoFilter(p.Root(), styles.dxfs)
+				}
+				if hasHL {
+					sheet.Hyperlinks = parseHyperlinks(p.Root(), pkg.relsOf(rel.Target))
+				}
 			}
 		}
 		if commentsRel, ok := pkg.firstRelOfType(rel.Target, relComments); ok {
@@ -136,6 +149,18 @@ func partOfType(pkg *pkgReader, wbPart, relType string) []byte {
 
 // onOff reads an OOXML boolean attribute (absent = false; "1"/"true" = true).
 func onOff(v string) bool { return v == "1" || v == "true" }
+
+// onOffDefault reads an OOXML boolean whose schema default is def: "" (or an
+// unrecognized value) yields def.
+func onOffDefault(v string, def bool) bool {
+	switch v {
+	case "1", "true":
+		return true
+	case "0", "false":
+		return false
+	}
+	return def
+}
 
 // parseSharedStrings extracts the shared-string table: each si is either a
 // plain t or rich-text r/t runs, concatenated.
@@ -180,6 +205,8 @@ type styleTable struct {
 	resolved []*Style
 	// dxfs are the differential formats conditional-format rules reference.
 	dxfs []*Style
+	// defaultFont is the Normal style's font (see Workbook.DefaultFont).
+	defaultFont Font
 }
 
 // xmlFontDef is a font record (the fonts table and dxf fonts share it).
@@ -310,6 +337,17 @@ func parseStyles(data []byte) styleTable {
 				Border *xmlBorderDef `xml:"border"`
 			} `xml:"dxf"`
 		} `xml:"dxfs"`
+		CellStyleXfs struct {
+			Xf []struct {
+				FontID int `xml:"fontId,attr"`
+			} `xml:"xf"`
+		} `xml:"cellStyleXfs"`
+		CellStyles struct {
+			Style []struct {
+				XfID      int  `xml:"xfId,attr"`
+				BuiltinID *int `xml:"builtinId,attr"`
+			} `xml:"cellStyle"`
+		} `xml:"cellStyles"`
 		CellXfs struct {
 			Xf []struct {
 				NumFmtID  int `xml:"numFmtId,attr"`
@@ -343,6 +381,26 @@ func parseStyles(data []byte) styleTable {
 		fullFonts[i] = fontFromXML(f)
 	}
 
+	// The workbook default font is the Normal cell style's font: the
+	// cellStyle with builtinId 0 names its cellStyleXfs record (record 0 when
+	// the table omits it), falling back to fonts[0].
+	normalXf := 0
+	for _, cs := range doc.CellStyles.Style {
+		if cs.BuiltinID != nil && *cs.BuiltinID == 0 {
+			normalXf = cs.XfID
+			break
+		}
+	}
+	defaultFontID := 0
+	if normalXf >= 0 && normalXf < len(doc.CellStyleXfs.Xf) {
+		defaultFontID = doc.CellStyleXfs.Xf[normalXf].FontID
+	}
+	if defaultFontID >= 0 && defaultFontID < len(fullFonts) {
+		st.defaultFont = fullFonts[defaultFontID]
+	} else if len(fullFonts) > 0 {
+		st.defaultFont = fullFonts[0]
+	}
+
 	fullFills := make([]Fill, len(doc.Fills.Fill))
 	for i, f := range doc.Fills.Fill {
 		fullFills[i] = fillFromXML(f)
@@ -372,6 +430,14 @@ func parseStyles(data []byte) styleTable {
 		s := &Style{NumFmtID: xf.NumFmtID, NumFmt: resolveNumFmt(xf.NumFmtID, st.customFmt)}
 		if xf.FontID >= 0 && xf.FontID < len(fullFonts) {
 			s.Font = fullFonts[xf.FontID]
+		}
+		// A font record without <sz> or <name> shows in the default font's
+		// size and family (Excel and Google Sheets both do this).
+		if s.Font.Size == 0 {
+			s.Font.Size = st.defaultFont.Size
+		}
+		if s.Font.Name == "" {
+			s.Font.Name = st.defaultFont.Name
 		}
 		if xf.FillID >= 0 && xf.FillID < len(fullFills) {
 			s.Fill = fullFills[xf.FillID]
@@ -466,6 +532,10 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 	var cells []rawCell
 	maxRow, maxCol := -1, -1
 	sharedMasters := map[int]sharedMaster{}
+	seenView := false
+	colStyles := map[int]int{} // zero-based column -> <col style> xf
+	rowXfs := map[int]int{}    // zero-based row -> row xf (customFormat rows)
+	baseColWidth := defaultBaseColWidth
 
 	dec := xml.NewDecoder(bytes.NewReader(data))
 	var cur *rawCell
@@ -511,9 +581,20 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 				if err := cancelled(ctx); err != nil {
 					return Sheet{}, err
 				}
-				parseRowElement(e, &sheet, styles)
+				parseRowElement(e, &sheet, styles, rowXfs)
 			case "col":
-				parseColElement(e, &sheet)
+				parseColElement(e, &sheet, colStyles)
+			case "sheetView":
+				// Only the first view counts (one per workbook view; the editor
+				// reads the same one).
+				if !seenView {
+					seenView = true
+					for _, a := range e.Attr {
+						if a.Name.Local == "showGridLines" {
+							sheet.HideGridLines = !onOffDefault(a.Value, true)
+						}
+					}
+				}
 			case "pane":
 				parsePaneElement(e, &sheet)
 			case "sheetFormatPr":
@@ -522,7 +603,13 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 					case "defaultRowHeight":
 						sheet.DefaultRowHeight, _ = strconv.ParseFloat(a.Value, 64)
 					case "defaultColWidth":
-						sheet.DefaultColWidth, _ = strconv.ParseFloat(a.Value, 64)
+						if w, err := strconv.ParseFloat(a.Value, 64); err == nil && w > 0 {
+							sheet.DefaultColWidth = w
+						}
+					case "baseColWidth":
+						if n, err := strconv.Atoi(a.Value); err == nil && n >= 0 && n <= 255 {
+							baseColWidth = n
+						}
 					}
 				}
 			case "tabColor":
@@ -578,12 +665,29 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 		}
 	}
 
+	if sheet.DefaultColWidth == 0 {
+		sheet.DefaultColWidth = derivedDefaultColWidth(baseColWidth, styles.defaultFont)
+	}
 	if maxRow < 0 || maxCol < 0 {
 		return sheet, nil
 	}
+	// A padding cell (no <c> element) shows the style an empty cell has in
+	// Excel: its row's style (customFormat), else its column's <col style>,
+	// else xf 0. Cell.Style is never nil.
 	grid := make([][]Cell, maxRow+1)
 	for i := range grid {
 		grid[i] = make([]Cell, maxCol+1)
+		rowXf, rowStyled := rowXfs[i]
+		for j := range grid[i] {
+			xf := 0
+			switch colXf, colStyled := colStyles[j]; {
+			case rowStyled:
+				xf = rowXf
+			case colStyled:
+				xf = colXf
+			}
+			grid[i][j] = Cell{StyleID: xf, Style: styles.styleFor(xf)}
+		}
 	}
 	for _, c := range cells {
 		// A shared-formula member carries no text of its own: expand the
@@ -606,7 +710,7 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 }
 
 // parseRowElement reads a row's explicit height and row-level style.
-func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable) {
+func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable, rowXfs map[int]int) {
 	rowNum := -1
 	var ht float64
 	hasHt := false
@@ -638,6 +742,7 @@ func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable) {
 		sheet.RowHeights[rowNum] = ht
 	}
 	if customFormat && styleIdx >= 0 {
+		rowXfs[rowNum] = styleIdx
 		if s := styles.styleFor(styleIdx); s != nil {
 			if sheet.RowStyles == nil {
 				sheet.RowStyles = map[int]*Style{}
@@ -648,10 +753,11 @@ func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable) {
 }
 
 // parseColElement expands a <col min..max> width declaration per column.
-func parseColElement(e xml.StartElement, sheet *Sheet) {
+func parseColElement(e xml.StartElement, sheet *Sheet, colStyles map[int]int) {
 	minCol, maxCol := -1, -1
 	var width float64
 	hasWidth := false
+	style, hasStyle := 0, false
 	for _, a := range e.Attr {
 		switch a.Name.Local {
 		case "min":
@@ -666,9 +772,13 @@ func parseColElement(e xml.StartElement, sheet *Sheet) {
 			if f, err := strconv.ParseFloat(a.Value, 64); err == nil {
 				width, hasWidth = f, true
 			}
+		case "style":
+			if n, err := strconv.Atoi(a.Value); err == nil && n > 0 {
+				style, hasStyle = n, true
+			}
 		}
 	}
-	if !hasWidth || minCol < 0 || maxCol < minCol || minCol >= maxSheetCols {
+	if minCol < 0 || maxCol < minCol || minCol >= maxSheetCols || (!hasWidth && !hasStyle) {
 		return
 	}
 	// Guard against a min..max covering the full 16384-column sheet: only the
@@ -676,11 +786,16 @@ func parseColElement(e xml.StartElement, sheet *Sheet) {
 	if maxCol > maxSheetCols-1 {
 		maxCol = maxSheetCols - 1
 	}
-	if sheet.ColWidths == nil {
+	if hasWidth && sheet.ColWidths == nil {
 		sheet.ColWidths = map[int]float64{}
 	}
 	for c := minCol; c <= maxCol; c++ {
-		sheet.ColWidths[c] = width
+		if hasWidth {
+			sheet.ColWidths[c] = width
+		}
+		if hasStyle {
+			colStyles[c] = style
+		}
 	}
 }
 

@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**29 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
+**30 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -152,6 +152,15 @@ trusting any entry that has aged** — grep for the claimed symptom first.
 - ☐ **M5. Embedded fonts** — de-obfuscate `word/fonts/*`, which also fixes bold/italic. *Medium.* DOCX
   additionally resolves bundled-only today: the `OSFontProvider` seam exists and the HTML and PDF
   backends install it, but `docxDocument` (`reflow_backend.go`) does not.
+
+## XLSX editor
+
+- ☐ **X1. Sheet rename does not rewrite most references.** *Medium.* `SheetEdit.SetName` rewrites
+  only the renamed sheet's own built-in local names (`_xlnm._FilterDatabase`, `Print_Area`,
+  `Print_Titles`). Excel also rewrites the old name in every cell formula, other defined names,
+  pivot cache sources, and conditional-format or validation formulas. Here they keep the old name
+  and point at a sheet that no longer exists. `renameSheetRefs` (boundary-aware, skips string
+  literals) does the rewrite and can be applied to those.
 
 ## Pagination — structural
 

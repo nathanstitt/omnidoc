@@ -1280,6 +1280,100 @@ dependency is `x/image`, so no new transitive surface):
   source header name, hard-erroring on unknowns. `SetDefinedNames`/`DefinedNames()` replace and
   read the workbook names, including sheet-local and hidden ones. Editor-core fix: `setPart`
   resurrects a deleted part, so remove-then-add works in one session — calc's save shape.
+- Pivot layout facts read AND write, so they survive calc's remove-then-add save. The `x="-2"`
+  "Values" placeholder is `ValuesAxis`/`ValuesPosition`, never an empty-named axis field. The
+  reader also honors `dataOnRows`/`dataPosition` when no placeholder element exists and the table
+  has two or more values. The writer emits the placeholder only for two or more values, as Excel
+  does: where asked, else last on the column axis. `PivotValueField.NumFmt` resolves through the styles part: the dataField's `numFmtId`,
+  else the source pivotField's. On write it maps General to 0 and a builtin code to its id with no
+  styles part needed. It reuses or allocates a custom id only after every check has passed, and
+  `AddPivotTable` checks every part it wires before the first change, so a refused table leaves
+  the file unchanged. A style edit on a workbook with no styles part creates one, wired into the
+  workbook rels and content types. `numFmtIDFor` no longer allocates a custom "General" record.
+  `AxisSort` carries `sortType` ascending/descending per axis field. `LocationInfo` carries the
+  `<location>` offsets and page counts. They describe the layout as read, so a caller that
+  changes the fields sets it to nil. The data, row-header, column-header, grand-total, missing, and error captions
+  (with `showMissing`/`showError`) round-trip too. A bad axis or sort name is a hard error.
+- `PivotTable.CacheFields` keeps the cache's source-column names. A read fills them from the
+  database fields; a calculated or grouping field (`databaseField="0"`) is left out, so a re-add
+  of such a pivot still works. `AddPivotTable` names each column by its header's display text,
+  but it keeps the producer's name while that name still names the header: the same text, the text
+  plus a repeat count, or the same date or number in another format. So a re-add keeps Google's
+  `12/6/24` and `" 2"`, a renamed header takes its new text, and a resized source range is
+  harmless. A numeric header is no longer an anonymous `FieldN`. Repeats are numbered left to
+  right, so cache names stay unique. Before this, a source with 20 blank-looking headers wrote 20
+  cache fields named `" "`. Checked against calc's real Google Sheets export
+  (`testdata/xlsx/google-export.xlsx`, pinned by `reference_test.go`): both pivots survive
+  remove-then-add with every cache name unchanged.
+
+**XLSX sheet view, autoFilter, hyperlinks, default font** (`pkg/xlsx`, requested by tinycld calc):
+
+- `Sheet.HideGridLines` (first `sheetView` has `showGridLines="0"`; the zero value shows them) and
+  `SheetEdit.ShowGridLines`/`SetShowGridLines`.
+  Showing removes the attribute on every view; hiding creates the view when absent. Panes,
+  selections, and other attributes stay, and a no-op leaves the part byte-verbatim.
+- `Sheet.AutoFilter` / `SheetEdit.AutoFilter` share one raw-fidelity parse. `Ref` has its `$`
+  anchors stripped. Each column reads typed: value list with blank and date groups, custom
+  (AND/OR, default operator `equal`), top10, dynamic, color (dxf resolved), and icon. A verbatim
+  `Raw` per column and verbatim `Extra` children (`sortState`, `extLst`) pass through.
+  `SetAutoFilter` replaces the filter. A Raw column re-emits verbatim (with `colId` restamped)
+  only while its typed fields still match what Raw encodes, so a typed edit is never lost. Typed
+  columns synthesize, and a color filter mints a deduped dxf. A `ColID` outside `Ref` or used
+  twice is refused, as is a column with two filter kinds (`ErrFilterColumn`) or a custom criterion
+  with other than one or two comparisons. A date group always writes the required `year` and
+  `dateTimeGrouping` (derived from the deepest part set). The hidden sheet-local
+  `_xlnm._FilterDatabase` name follows: set to the quoted, absolute range, or removed with `nil`.
+  Only that one `definedName` is touched. `nil` on a sheet with no autoFilter changes nothing,
+  so an Advanced Filter's database name survives. Removing a filter also clears `sheetPr
+  filterMode`. A write that changes nothing leaves the part byte-verbatim. Row visibility is not
+  recomputed: rows a removed filter hid stay hidden, because the file does not say which hidden
+  rows it hid.
+- `Sheet.Hyperlinks` / `SheetEdit.Hyperlinks` resolve `r:id` through the sheet rels. External
+  targets now stay verbatim in the rels reader instead of being joined as part paths.
+  `SetHyperlinks` replaces the set wholesale. It drops only hyperlink relationships, adds one
+  `TargetMode="External"` relationship per URL, and keeps `location`/`display`/`tooltip`. Writing
+  back the links just read is a no-op. A URL is stored with the characters a URI may not hold
+  (space, controls, quote, angle brackets, backslash, caret, backtick, braces, pipe)
+  percent-escaped, as Excel stores it, and reads back in that form. One longer than Excel's 2079
+  characters is refused, and a link with no target returns `ErrHyperlinkTarget`. Both
+  views read a hyperlink target as written, even without `TargetMode`. ISO-strict sheets resolve,
+  and a rewrite keeps the strict relationship type. A corpus test writes back every sheet's
+  gridlines, filter, and links as read and requires every part unchanged — calc's save loop.
+- Relationship-id attributes declare their namespace. A sheet the editor created has no
+  `xmlns:r`, so `SetComment` used to write `legacyDrawing` with an unbound `r:` prefix. Every
+  `r:id` the editor writes (sheet, pivot cache, legacy drawing, hyperlink) now reuses the bound
+  prefix, transitional or strict, or declares one.
+- `MoveSheet` and `DeleteSheet` keep sheet-local defined names on their sheet: `localSheetId`
+  follows the move, and a deleted sheet's local names go, as in Excel. Every `workbookView`'s
+  `activeTab` and `firstSheet` follow the same way. A deleted active tab passes, as in Excel, to the
+  next visible sheet (the previous one when none follows), which also gets `tabSelected`.
+  `SetName` rewrites the sheet's own built-in local names (`_FilterDatabase`, `Print_Area`,
+  `Print_Titles`) to the new name, quoted as needed. The rewrite respects reference boundaries and
+  skips string literals. Other formulas and names keep the old name (backlog X1).
+- `SheetEdit.DefaultRowHeight`/`DefaultColWidth` read the sheet defaults (the same values as the
+  `Sheet` fields), and `SetDefaultRowHeight(pt)`/`SetDefaultColWidth(chars)` write
+  `<sheetFormatPr>`. A row height must be above 0 and at most 409 pt, and is written with
+  `customHeight="1"`, as Excel does. A width must be above 0 and at most 255 characters. Other attributes stay, and an unchanged value leaves the part
+  byte-verbatim. A created `sheetFormatPr` needs the schema's required `defaultRowHeight`. It gets
+  Excel's 12.75 for an Arial 10 workbook, else 15 (Calibri 11). That is an approximation for other
+  fonts: Excel derives the height from hinted metrics this package does not have.
+- `Serial1900`/`SerialFrom1900` convert a serial between a `Date1904` workbook and the 1900
+  system (1462 days), for a 1900-based formula engine. `Value.F` stays the stored serial.
+- Grid padding cells (no `<c>` element) carry the style an empty cell shows in Excel: the row's
+  style (`customFormat`), else the column's `<col style>`, else xf 0. `StyleID` matches. So
+  `Cell.Style` is never nil, as documented. Before, padding cells had a nil style.
+- `Workbook.DefaultFont` / `File.DefaultFont()` give the Normal style's font: the
+  `builtinId="0"` cellStyle → its `cellStyleXfs` record → fonts, else record 0, else `fonts[0]`. A
+  cell font with no `<sz>` or `<name>` resolves to the default font's size and family in
+  `Style.Font`, as Excel and Google Sheets show it. Differential (dxf) fonts stay sparse.
+- `Sheet.DefaultColWidth` is in character units and is never zero. A declared `defaultColWidth`
+  is kept verbatim. Otherwise it derives from `baseColWidth` (default 8) per ECMA-376 §18.3.1.81:
+  the digits plus 5 px of padding, rounded up to a multiple of 8 px (Microsoft KB 214123), then
+  truncated to 1/256. Calibri 11 and Arial 10 give 9.140625, the "8.43" in Excel's UI. The
+  widest-digit widths come from a table measured from the font files (Calibri via Carlito,
+  Cambria via Caladea, Helvetica, Arial, Times, Courier, Verdana, Tahoma, Georgia, Trebuchet,
+  Comic Sans, Roboto, Open Sans, and the Liberation/Arimo/Tinos/Cousine equivalents). An unknown
+  family silently uses Calibri's width, because this path has no logger.
 
 **External office corpus — real-world DOCX/XLSX preservation fixtures**
 (`testdata/external/{docx,xlsx}`):
