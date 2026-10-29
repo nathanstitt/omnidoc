@@ -45,8 +45,10 @@ func TestSerializeMinimalPDFParses(t *testing.T) {
 	}
 }
 
-// TestSerializeStreamFlateRoundTrips asserts addStream flate-encodes its content
-// and declares the filter.
+// TestSerializeStreamFlateRoundTrips asserts addStream flate-encodes its content,
+// declares the filter, and that the project's own parser decodes it back. It
+// does not check the encoded bytes: for short input compress/flate may write a
+// stored block, which is valid FlateDecode data and differs by Go version.
 func TestSerializeStreamFlateRoundTrips(t *testing.T) {
 	w := newWriter()
 	content := []byte("BT /F1 12 Tf (hi) Tj ET")
@@ -72,15 +74,23 @@ func TestSerializeStreamFlateRoundTrips(t *testing.T) {
 	if err := w.serialize(&buf); err != nil {
 		t.Fatalf("serialize: %v", err)
 	}
-	if !bytes.Contains(buf.Bytes(), []byte("/Filter")) {
-		t.Fatal("stream not marked with a /Filter")
-	}
-	if bytes.Contains(buf.Bytes(), content) {
-		t.Fatal("stream content stored uncompressed (raw bytes present)")
-	}
-	// And it must still parse.
-	if _, err := pdf.Parse(buf.Bytes()); err != nil {
+	doc, err := pdf.Parse(buf.Bytes())
+	if err != nil {
 		t.Fatalf("pkg/pdf failed to parse output with stream: %v", err)
+	}
+	s := doc.GetStream(pdf.Reference{Number: int(sid)})
+	if s == nil {
+		t.Fatal("stream object not found in output")
+	}
+	if f, _ := doc.GetName(s.Dict["Filter"]); f != "FlateDecode" {
+		t.Fatalf("/Filter = %q, want FlateDecode", f)
+	}
+	got, _, err := doc.DecodedStream(s)
+	if err != nil {
+		t.Fatalf("decode stream: %v", err)
+	}
+	if !bytes.Equal(got, content) {
+		t.Fatalf("decoded stream = %q, want %q", got, content)
 	}
 }
 
