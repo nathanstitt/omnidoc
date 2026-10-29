@@ -490,7 +490,7 @@ func quoteSheetName(name string) string {
 	for i, r := range name {
 		isLetter := r == '_' || (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z')
 		isDigit := r >= '0' && r <= '9'
-		if !(isLetter || (i > 0 && (isDigit || r == '.'))) {
+		if !isLetter && (i == 0 || (!isDigit && r != '.')) {
 			plain = false
 			break
 		}

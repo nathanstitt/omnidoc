@@ -78,7 +78,8 @@ func TestParseGradientRejects(t *testing.T) {
 		"linear-gradient(45px, red, blue)",  // a length is not an <angle>
 		"linear-gradient(to, red, blue)",    // dangling `to`
 		"linear-gradient(to up, red, blue)", // not a side keyword
-		"linear-gradient(to left right, red, blue)", // two keywords on one axis
+		// Two keywords on one axis.
+		"linear-gradient(to left right, red, blue)",
 		"linear-gradient(to top bottom, red, blue)",
 		"linear-gradient(to top left bottom, red, blue)",
 		"linear-gradient(red, notacolour)",
