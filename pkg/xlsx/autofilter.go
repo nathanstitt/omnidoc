@@ -3,6 +3,7 @@ package xlsx
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -34,9 +35,11 @@ type AutoFilter struct {
 
 // FilterColumn is one <filterColumn>. At most one filter kind is set:
 // Values/Blank/DateGroups (a value list), Custom, Top10, Dynamic, Color, or
-// Icon. Raw carries the VERBATIM element for lossless passthrough, the same
-// contract as CFRule.Raw: when Raw is set, SetAutoFilter re-emits it and
-// changes only colId (from ColID).
+// Icon. Raw carries the VERBATIM element for lossless passthrough: while the
+// typed fields still match what Raw encodes, SetAutoFilter re-emits Raw and
+// changes only colId (from ColID). Once a typed field is edited, the typed
+// fields are written instead, so an edit is never lost (unmodeled parts of
+// that column's Raw then drop).
 type FilterColumn struct {
 	// ColID is the zero-based column offset from the first column of Ref.
 	ColID int
@@ -70,6 +73,30 @@ type FilterColumn struct {
 type DateGroupItem struct {
 	Year, Month, Day, Hour, Minute, Second int
 	Grouping                               string
+}
+
+// grouping is the item's dateTimeGrouping: Grouping when set, else the
+// deepest part that is set (a zero year groups by year).
+func (g DateGroupItem) grouping() string {
+	if g.Grouping != "" {
+		return g.Grouping
+	}
+	for _, p := range []struct {
+		name string
+		v    int
+	}{{"second", g.Second}, {"minute", g.Minute}, {"hour", g.Hour}, {"day", g.Day}, {"month", g.Month}} {
+		if p.v != 0 {
+			return p.name
+		}
+	}
+	return "year"
+}
+
+// sameFilterCriteria reports whether two columns carry the same typed
+// criteria (ColID and Raw aside).
+func sameFilterCriteria(a, b FilterColumn) bool {
+	a.ColID, a.Raw, b.ColID, b.Raw = 0, nil, 0, nil
+	return reflect.DeepEqual(a, b)
 }
 
 // CustomFilters is a <customFilters> criterion: one or two comparisons,
@@ -223,30 +250,47 @@ func (s *SheetEdit) AutoFilter() *AutoFilter {
 // with the sheet's hidden _xlnm._FilterDatabase defined name. A non-nil
 // filter writes the element and sets that defined name to the absolute range
 // (creating it when absent), as Excel does. Ref must be a valid A1 range
-// ("$" anchors are accepted and stripped). Rows the filter hides are not
-// recomputed: row visibility stays as the cells' rows declare it.
+// ("$" anchors are accepted and stripped); each column's ColID must fall
+// inside it, once.
+//
+// nil on a sheet with no autoFilter changes nothing — not even a
+// _FilterDatabase name an Advanced Filter keeps. Removing a filter also
+// clears sheetPr filterMode. Row visibility is not recomputed in either
+// direction: rows the filter hid keep their hidden flag after it is removed
+// (the file does not say which hidden rows the filter hid and which were
+// hidden by hand).
 func (s *SheetEdit) SetAutoFilter(af *AutoFilter) error {
-	var el *etree.Element
-	var rng Range
-	if af != nil {
-		var err error
-		rng, err = ParseRange(stripAnchors(af.Ref))
-		if err != nil {
-			return err
-		}
-		el, err = s.file.autoFilterElement(af, rng)
-		if err != nil {
-			return err
-		}
-	}
-	// A call that changes nothing leaves the sheet part byte-verbatim: calc
-	// pushes every sheet's filter (nil for most) on every save.
 	root, err := s.doc()
 	if err != nil {
 		return err
 	}
-	if old := xmlpart.FindChild(root, "autoFilter"); sameAutoFilter(old, el) {
-		return s.setFilterDatabase(af != nil, rng)
+	old := xmlpart.FindChild(root, "autoFilter")
+	if af == nil {
+		if old == nil {
+			return nil
+		}
+		if root, err = s.mut(); err != nil {
+			return err
+		}
+		xmlpart.Remove(root, xmlpart.FindChild(root, "autoFilter"))
+		if pr := xmlpart.FindChild(root, "sheetPr"); pr != nil {
+			pr.RemoveAttr("filterMode")
+		}
+		return s.setFilterDatabase(false, Range{})
+	}
+
+	rng, err := ParseRange(stripAnchors(af.Ref))
+	if err != nil {
+		return err
+	}
+	el, err := s.file.autoFilterElement(af, rng)
+	if err != nil {
+		return err
+	}
+	// A call that changes nothing leaves the sheet part byte-verbatim: calc
+	// pushes every sheet's filter on every save.
+	if sameAutoFilter(old, el) {
+		return s.setFilterDatabase(true, rng)
 	}
 	if root, err = s.mut(); err != nil {
 		return err
@@ -254,12 +298,10 @@ func (s *SheetEdit) SetAutoFilter(af *AutoFilter) error {
 	if old := xmlpart.FindChild(root, "autoFilter"); old != nil {
 		xmlpart.Remove(root, old)
 	}
-	if el != nil {
-		placeholder := xmlpart.EnsureChildInOrder(root, "autoFilter", worksheetOrder)
-		xmlpart.InsertBefore(root, el, placeholder)
-		xmlpart.Remove(root, placeholder)
-	}
-	return s.setFilterDatabase(af != nil, rng)
+	placeholder := xmlpart.EnsureChildInOrder(root, "autoFilter", worksheetOrder)
+	xmlpart.InsertBefore(root, el, placeholder)
+	xmlpart.Remove(root, placeholder)
+	return s.setFilterDatabase(true, rng)
 }
 
 // sameAutoFilter reports whether the sheet's current <autoFilter> (nil when
@@ -280,7 +322,16 @@ func sameAutoFilter(old, el *etree.Element) bool {
 func (f *File) autoFilterElement(af *AutoFilter, rng Range) (*etree.Element, error) {
 	el := etree.NewElement("autoFilter")
 	el.CreateAttr("ref", rng.String())
+	width := rng.EndCol - rng.StartCol + 1
+	seen := map[int]bool{}
 	for i, col := range af.Columns {
+		if col.ColID < 0 || col.ColID >= width {
+			return nil, fmt.Errorf("xlsx: filter column %d: ColID %d is outside the %d columns of %s", i, col.ColID, width, rng)
+		}
+		if seen[col.ColID] {
+			return nil, fmt.Errorf("xlsx: filter column %d: ColID %d is already filtered", i, col.ColID)
+		}
+		seen[col.ColID] = true
 		ch, err := f.filterColumnElement(col)
 		if err != nil {
 			return nil, fmt.Errorf("xlsx: filter column %d: %w", i, err)
@@ -300,14 +351,18 @@ func (f *File) autoFilterElement(af *AutoFilter, rng Range) (*etree.Element, err
 // filterColumnElement builds one <filterColumn>: verbatim from Raw when
 // present (colId restamped), else from the typed fields.
 func (f *File) filterColumnElement(col FilterColumn) (*etree.Element, error) {
+	// Raw re-emits verbatim only while the typed fields still say what it
+	// says; a typed edit of a column read with Raw wins, so it is never lost.
 	if len(col.Raw) > 0 {
 		p, err := xmlpart.Parse(col.Raw)
 		if err != nil {
 			return nil, err
 		}
-		el := p.Root().Copy()
-		el.CreateAttr("colId", strconv.Itoa(col.ColID))
-		return el, nil
+		if sameFilterCriteria(parseFilterColumn(p.Root(), f.resolvedStyles().dxfs), col) {
+			el := p.Root().Copy()
+			el.CreateAttr("colId", strconv.Itoa(col.ColID))
+			return el, nil
+		}
 	}
 	kinds := 0
 	if len(col.Values) > 0 || col.Blank || len(col.DateGroups) > 0 {
@@ -337,18 +392,24 @@ func (f *File) filterColumnElement(col FilterColumn) (*etree.Element, error) {
 			fe.CreateElement("filter").CreateAttr("val", v)
 		}
 		for _, g := range col.DateGroups {
+			// year and dateTimeGrouping are required; the other parts are
+			// written when set.
 			ge := fe.CreateElement("dateGroupItem")
+			ge.CreateAttr("year", strconv.Itoa(g.Year))
 			for _, a := range []struct {
 				name string
 				v    int
-			}{{"year", g.Year}, {"month", g.Month}, {"day", g.Day}, {"hour", g.Hour}, {"minute", g.Minute}, {"second", g.Second}} {
+			}{{"month", g.Month}, {"day", g.Day}, {"hour", g.Hour}, {"minute", g.Minute}, {"second", g.Second}} {
 				if a.v != 0 {
 					ge.CreateAttr(a.name, strconv.Itoa(a.v))
 				}
 			}
-			ge.CreateAttr("dateTimeGrouping", g.Grouping)
+			ge.CreateAttr("dateTimeGrouping", g.grouping())
 		}
 	case col.Custom != nil:
+		if n := len(col.Custom.Filters); n < 1 || n > 2 {
+			return nil, fmt.Errorf("xlsx: customFilters holds %d comparisons; the schema allows 1 or 2", n)
+		}
 		ce := el.CreateElement("customFilters")
 		if col.Custom.And {
 			ce.CreateAttr("and", "1")

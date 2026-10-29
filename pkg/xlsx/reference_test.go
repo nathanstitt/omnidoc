@@ -36,9 +36,9 @@ func TestGoogleExportRead(t *testing.T) {
 	detail := wb.Sheets[0]
 
 	// Item 1: gridlines are off on sheets 2 and 3 only.
-	for i, want := range []bool{true, false, false} {
-		if wb.Sheets[i].ShowGridLines != want {
-			t.Errorf("sheet %d ShowGridLines = %v, want %v", i+1, wb.Sheets[i].ShowGridLines, want)
+	for i, want := range []bool{false, true, true} {
+		if wb.Sheets[i].HideGridLines != want {
+			t.Errorf("sheet %d HideGridLines = %v, want %v", i+1, wb.Sheets[i].HideGridLines, want)
 		}
 	}
 	// Item 2: the autoFilter ref is stored as $A$1:$BY$35.

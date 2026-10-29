@@ -67,10 +67,82 @@ func (s *SheetEdit) SetName(name string) error {
 	}
 	el.CreateAttr("name", name)
 	s.file.dirty["xl/workbook.xml"] = true
+	s.file.renameLocalBuiltinNames(s.name, name)
 	delete(s.file.sheets, s.name)
 	s.name = name
 	s.file.sheets[name] = s
 	return nil
+}
+
+// renameLocalBuiltinNames rewrites the sheet references in the renamed
+// sheet's own built-in names (_xlnm._FilterDatabase, _xlnm.Print_Area,
+// _xlnm.Print_Titles, ...), which point at that sheet by name, so they keep
+// pointing at it. Other formulas and names keep the old name (backlog X1).
+func (f *File) renameLocalBuiltinNames(oldName, newName string) {
+	idx, err := f.sheetIndex(newName)
+	if err != nil {
+		return
+	}
+	wb, err := f.part("xl/workbook.xml")
+	if err != nil {
+		return
+	}
+	dn := xmlpart.FindChild(wb.Root(), "definedNames")
+	if dn == nil {
+		return
+	}
+	for _, el := range xmlpart.Children(dn, "definedName") {
+		if !strings.HasPrefix(el.SelectAttrValue("name", ""), "_xlnm.") ||
+			el.SelectAttrValue("localSheetId", "") != strconv.Itoa(idx) {
+			continue
+		}
+		if text := el.Text(); text != "" {
+			if renamed := renameSheetRefs(text, oldName, newName); renamed != text {
+				el.SetText(renamed)
+			}
+		}
+	}
+}
+
+// renameSheetRefs rewrites every reference to sheet oldName in a formula
+// ("old!A1", "'old name'!A1") to newName, quoted as needed. A match must
+// start a reference — at the start or after an operator, comma, paren, or
+// space — so "Data" does not match inside "MyData!A1", and text inside
+// string literals is left alone.
+func renameSheetRefs(formula, oldName, newName string) string {
+	forms := []string{"'" + strings.ReplaceAll(oldName, "'", "''") + "'!"}
+	if q := quoteSheetName(oldName); !strings.HasPrefix(q, "'") {
+		forms = append(forms, q+"!")
+	}
+	repl := quoteSheetName(newName) + "!"
+	var sb strings.Builder
+	inString := false
+	for i := 0; i < len(formula); {
+		ch := formula[i]
+		if ch == '"' {
+			inString = !inString
+			sb.WriteByte(ch)
+			i++
+			continue
+		}
+		if !inString && (i == 0 || strings.IndexByte(",;( =+-*/&^<>:", formula[i-1]) >= 0) {
+			matched := false
+			for _, form := range forms {
+				if len(formula)-i >= len(form) && strings.EqualFold(formula[i:i+len(form)], form) {
+					sb.WriteString(repl)
+					i += len(form)
+					matched = true
+					break
+				}
+			}
+			if matched {
+				continue
+			}
+		}
+		sb.WriteByte(ch)
+		i++
+	}
+	return sb.String()
 }
 
 // Visibility reports the sheet's view state.

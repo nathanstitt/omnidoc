@@ -6,6 +6,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/beevik/etree"
 	"github.com/nathanstitt/omnidoc/pkg/xlsx/internal/xmlpart"
@@ -24,14 +25,17 @@ type PivotTable struct {
 	// TargetSheet/Location place the pivot (Location is the anchor range).
 	TargetSheet string
 	Location    string
-	// CacheFields are the cache's field names, one per source column in
-	// order — the names Rows, Cols, Filters, Values, and AxisSort use. A read
-	// fills them from the cache, so a re-add keeps the producer's names
-	// ("12/6/24" for a date header, " 2" for a repeated one). On write, nil
-	// derives them from the header row's display text, where a date reads in
-	// ISO form ("2024-12-06") like Cell.Text and repeats are numbered " ",
-	// " 2", ... A non-nil list is used verbatim and must name every source
-	// column exactly once.
+	// CacheFields are the cache's source-column field names in order — the
+	// names Rows, Cols, Filters, Values, and AxisSort use. A read fills them
+	// from the cache's database fields; a calculated or grouping field
+	// (databaseField="0") is not a source column and is left out. On write
+	// each column is named by its header's display text (a date reads in ISO
+	// form, "2024-12-06", like Cell.Text; repeats are numbered " ", " 2",
+	// ...), unless CacheFields holds the producer's name for that column and
+	// it still names the header: the same text, the text plus a repeat count,
+	// or the same date or number in another format ("12/6/24"). So a re-add
+	// keeps Google's names, a renamed header takes its new text, and extra or
+	// missing entries (a resized source range) are harmless.
 	CacheFields []string
 	// Rows/Cols/Filters are the axis fields by source-column name.
 	Rows, Cols, Filters []string
@@ -57,7 +61,10 @@ type PivotTable struct {
 	// Fields in manual (file) order are absent.
 	AxisSort map[string]string
 	// LocationInfo is the <location> band offsets. A read always sets it. On
-	// write, nil keeps the default single-header layout (1, 2, 1).
+	// write, nil keeps the default single-header layout (1, 2, 1). The
+	// offsets describe the layout as read and the writer cannot recompute
+	// them: after changing Rows, Cols, Filters, Values, or ValuesAxis, set
+	// LocationInfo to nil.
 	LocationInfo *PivotLocation
 
 	// DataCaption is the "Values" caption ("Values" when empty on write).
@@ -264,7 +271,8 @@ func (f *File) readPivotTable(partName, targetSheet string) (PivotTable, bool) {
 				} `xml:"cacheSource"`
 				Fields struct {
 					Field []struct {
-						Name string `xml:"name,attr"`
+						Name          string `xml:"name,attr"`
+						DatabaseField string `xml:"databaseField,attr"`
 					} `xml:"cacheField"`
 				} `xml:"cacheFields"`
 			}
@@ -273,8 +281,12 @@ func (f *File) readPivotTable(partName, targetSheet string) (PivotTable, bool) {
 				pt.SourceRange = cache.Source.WS.Ref
 				for _, cf := range cache.Fields.Field {
 					fields = append(fields, cf.Name)
+					// A calculated or grouping field (databaseField="0") is
+					// not a source column, so it is not in CacheFields.
+					if onOffDefault(cf.DatabaseField, true) {
+						pt.CacheFields = append(pt.CacheFields, cf.Name)
+					}
 				}
-				pt.CacheFields = fields
 			}
 		}
 	}
@@ -471,30 +483,32 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 	if pt.Location == "" {
 		return fmt.Errorf("xlsx: pivot table %q needs a target location", pt.Name)
 	}
+	// Every part the wiring mutates must exist before the first change, so a
+	// failure leaves the file as it was.
+	for _, part := range []string{"xl/workbook.xml", "xl/_rels/workbook.xml.rels", "[Content_Types].xml"} {
+		if _, err := f.part(part); err != nil {
+			return err
+		}
+	}
 
 	// Field names from the header row: each cell's display text (a date
-	// header uses the reader's Cell.Text rule). Cache field names must be
-	// unique, so, left to right, a repeat gets the lowest count from 2 that
-	// makes it unique appended — " ", " 2", " 3", as Excel and Google Sheets
-	// number repeats.
+	// header uses the reader's Cell.Text rule). A producer's name from
+	// CacheFields is kept while it still names its header (see
+	// cacheNameMatches), so a re-add keeps "12/6/24" but a renamed header
+	// takes its new text. Cache field names must be unique, so, left to
+	// right, a repeat gets the lowest count from 2 that makes it unique
+	// appended — " ", " 2", " 3", as Excel and Google Sheets number repeats.
 	var fields []string
 	fieldIdx := map[string]int{}
-	if pt.CacheFields != nil {
-		if width := srcRange.EndCol - srcRange.StartCol + 1; len(pt.CacheFields) != width {
-			return fmt.Errorf("xlsx: pivot %q has %d cache field names for %d source columns", pt.Name, len(pt.CacheFields), width)
-		}
-		for i, name := range pt.CacheFields {
-			if _, dup := fieldIdx[name]; dup {
-				return fmt.Errorf("xlsx: pivot %q cache field name %q is not unique", pt.Name, name)
-			}
-			fieldIdx[name] = i
-		}
-		fields = pt.CacheFields
-	}
-	for col := srcRange.StartCol; pt.CacheFields == nil && col <= srcRange.EndCol; col++ {
-		name := src.headerText(srcRange.StartRow, col)
+	for col := srcRange.StartCol; col <= srcRange.EndCol; col++ {
+		i := col - srcRange.StartCol
+		text := src.headerText(srcRange.StartRow, col)
+		name := text
 		if name == "" {
-			name = "Field" + strconv.Itoa(col-srcRange.StartCol+1)
+			name = "Field" + strconv.Itoa(i+1)
+		}
+		if i < len(pt.CacheFields) && src.cacheNameMatches(pt.CacheFields[i], text, srcRange.StartRow, col) {
+			name = pt.CacheFields[i]
 		}
 		base := name
 		for k := 2; ; k++ {
@@ -835,6 +849,49 @@ func (s *SheetEdit) headerText(row, col int) string {
 	}
 	raw := rawCell{value: strconv.FormatFloat(cd.Value.F, 'g', -1, 64), styleIdx: cd.StyleID}
 	return displayValue(raw, nil, s.file.resolvedStyles(), s.file.Date1904())
+}
+
+// cacheNameLayouts are the date forms a producer names a date header by
+// (Google Sheets and Excel write the header's display text).
+var cacheNameLayouts = []string{
+	"1/2/06", "01/02/06", "1/2/2006", "01/02/2006", "2006-01-02", "2-Jan-06", "02-Jan-06",
+	"2-Jan-2006", "Jan 2, 2006", "January 2, 2006", "2006/01/02", "2.1.2006", "02.01.2006",
+}
+
+// cacheNameMatches reports whether a producer's cache field name still names
+// the header cell whose display text is text: the same text; the text with
+// a repeat count (" 2" for the second " " header); any name for a blank
+// header; or, for a numeric or date header, the same number or date in the
+// producer's own format ("12/6/24" for a header read as "2024-12-06").
+func (s *SheetEdit) cacheNameMatches(name, text string, row, col int) bool {
+	if name == text {
+		return true
+	}
+	if text == "" {
+		return true
+	}
+	if rest, ok := strings.CutPrefix(name, text); ok && rest != "" {
+		if n, err := strconv.Atoi(rest); err == nil && n >= 2 && strconv.Itoa(n) == rest {
+			return true
+		}
+	}
+	cd := s.Cell(row, col)
+	switch cd.Value.Kind {
+	case KindNumber:
+		f, err := strconv.ParseFloat(strings.ReplaceAll(name, ",", ""), 64)
+		return err == nil && f == cd.Value.F
+	case KindDate:
+		y, m, d := cd.Value.T.Date()
+		for _, layout := range cacheNameLayouts {
+			if t, err := time.Parse(layout, name); err == nil {
+				ty, tm, td := t.Date()
+				if ty == y && tm == m && td == d {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // registerPivotCache adds a workbook pivotCaches entry (allocating the next

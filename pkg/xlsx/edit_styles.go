@@ -229,12 +229,43 @@ func patchEmpty(p StylePatch) bool {
 // stylesRoot returns the styles part root for mutation, bumping the
 // resolution-cache generation.
 func (f *File) stylesRoot() (*etree.Element, error) {
+	if !f.partExists("xl/styles.xml") {
+		if err := f.addStylesPart(); err != nil {
+			return nil, err
+		}
+	}
 	p, err := f.mutatePart("xl/styles.xml")
 	if err != nil {
 		return nil, err
 	}
 	f.styleGen++
 	return p.Root(), nil
+}
+
+// addStylesPart creates xl/styles.xml (minimalStyles) for a workbook that
+// has none, with its workbook relationship and content-type override, so a
+// style edit never fails for lack of the part.
+func (f *File) addStylesPart() error {
+	rels, err := f.mutatePart("xl/_rels/workbook.xml.rels")
+	if err != nil {
+		return err
+	}
+	ct, err := f.mutatePart("[Content_Types].xml")
+	if err != nil {
+		return err
+	}
+	if err := f.setPart("xl/styles.xml", []byte(minimalStyles)); err != nil {
+		return err
+	}
+	rel := rels.Root().CreateElement("Relationship")
+	rel.CreateAttr("Id", nextRelID(rels.Root()))
+	rel.CreateAttr("Type", relStyles)
+	rel.CreateAttr("Target", "styles.xml")
+	over := ct.Root().CreateElement("Override")
+	over.CreateAttr("PartName", "/xl/styles.xml")
+	over.CreateAttr("ContentType", "application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml")
+	f.styleGen++
+	return nil
 }
 
 // patchXf clones xf index cur, applies the patch, and dedupes the result,

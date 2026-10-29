@@ -96,6 +96,7 @@ func TestSetHyperlinks(t *testing.T) {
 	}
 
 	links[1].Ref = "E5"
+	links[2].URL = "https://example.org/x%20y" // stored escaped, as Excel does
 	wb, err := OpenBytes(context.Background(), out)
 	if err != nil {
 		t.Fatal(err)
@@ -179,6 +180,12 @@ func TestSetHyperlinksErrors(t *testing.T) {
 	}
 	if err := sh.SetHyperlinks([]Hyperlink{{Ref: "1A", URL: "https://x"}}); err == nil {
 		t.Error("bad ref accepted")
+	}
+	if err := sh.SetHyperlinks([]Hyperlink{{Ref: "A1", URL: "https://x/" + strings.Repeat("a", 2079)}}); err == nil {
+		t.Error("URL over 2079 characters accepted")
+	}
+	if got := escapeURL(`http://x/a b"<>\^{|}` + "`%20é"); got != `http://x/a%20b%22%3C%3E%5C%5E%7B%7C%7D%60%20é` {
+		t.Errorf("escapeURL = %q", got)
 	}
 }
 

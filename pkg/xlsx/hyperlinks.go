@@ -3,6 +3,8 @@ package xlsx
 import (
 	"errors"
 	"fmt"
+	"strings"
+	"unicode/utf8"
 
 	"github.com/beevik/etree"
 	"github.com/nathanstitt/omnidoc/pkg/xlsx/internal/xmlpart"
@@ -16,6 +18,27 @@ const (
 // isHyperlinkRel reports a transitional or strict hyperlink relationship.
 func isHyperlinkRel(relType string) bool {
 	return relType == relHyperlink || relType == relHyperlinkStrict
+}
+
+// maxHyperlinkLen is Excel's limit on a hyperlink address, in characters.
+const maxHyperlinkLen = 2079
+
+// escapeURL percent-encodes the bytes a URI may not hold literally — space,
+// controls, and " < > \ ^ ` { | } — as Excel does when it stores a link
+// ("a b" is written "a%20b"). Existing %-escapes and non-ASCII text (valid
+// in an IRI) stay as they are, so escaping twice changes nothing.
+func escapeURL(u string) string {
+	const unsafe = " \"<>\\^`{|}"
+	var sb strings.Builder
+	for i := 0; i < len(u); i++ {
+		c := u[i]
+		if c < 0x20 || c == 0x7f || strings.IndexByte(unsafe, c) >= 0 {
+			fmt.Fprintf(&sb, "%%%02X", c)
+			continue
+		}
+		sb.WriteByte(c)
+	}
+	return sb.String()
 }
 
 // ErrHyperlinkTarget reports a Hyperlink with neither a URL nor a Location.
@@ -77,7 +100,10 @@ func (s *SheetEdit) Hyperlinks() []Hyperlink {
 // element is rebuilt, every existing hyperlink relationship is dropped, and
 // each link with a URL gets a fresh TargetMode="External" relationship. An
 // empty list removes them all. Every Ref must be a valid A1 cell or range,
-// and every link needs a URL or a Location.
+// and every link needs a URL or a Location. A URL is stored with the
+// characters a URI may not hold percent-escaped (see escapeURL), so it
+// reads back in that form; one longer than Excel's 2079 characters is
+// refused.
 func (s *SheetEdit) SetHyperlinks(links []Hyperlink) error {
 	refs := make([]string, len(links))
 	for i, h := range links {
@@ -87,6 +113,9 @@ func (s *SheetEdit) SetHyperlinks(links []Hyperlink) error {
 		}
 		if h.URL == "" && h.Location == "" {
 			return fmt.Errorf("hyperlink %d (%s): %w", i, rng, ErrHyperlinkTarget)
+		}
+		if n := utf8.RuneCountInString(h.URL); n > maxHyperlinkLen {
+			return fmt.Errorf("xlsx: hyperlink %d (%s) URL is %d characters; Excel's limit is %d", i, rng, n, maxHyperlinkLen)
 		}
 		refs[i] = rng.String()
 	}
@@ -109,6 +138,7 @@ func (s *SheetEdit) SetHyperlinks(links []Hyperlink) error {
 		same := true
 		for i, h := range links {
 			h.Ref = refs[i]
+			h.URL = escapeURL(h.URL)
 			if cur[i] != h {
 				same = false
 				break
@@ -164,7 +194,7 @@ func (s *SheetEdit) SetHyperlinks(links []Hyperlink) error {
 			rel := rels.CreateElement("Relationship")
 			rel.CreateAttr("Id", id)
 			rel.CreateAttr("Type", linkType)
-			rel.CreateAttr("Target", h.URL)
+			rel.CreateAttr("Target", escapeURL(h.URL))
 			rel.CreateAttr("TargetMode", "External")
 			el.CreateAttr(idAttr, id)
 		}

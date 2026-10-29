@@ -32,8 +32,8 @@ func TestShowGridLinesRead(t *testing.T) {
 	}
 	want := map[string]bool{"Hidden": false, "Shown": true, "NoView": true}
 	for _, s := range wb.Sheets {
-		if s.ShowGridLines != want[s.Name] {
-			t.Errorf("reader %s: ShowGridLines = %v, want %v", s.Name, s.ShowGridLines, want[s.Name])
+		if s.HideGridLines == want[s.Name] {
+			t.Errorf("reader %s: HideGridLines = %v, want %v", s.Name, s.HideGridLines, !want[s.Name])
 		}
 	}
 	f, err := Edit(context.Background(), data)
@@ -90,8 +90,8 @@ func TestSetShowGridLines(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !wb.Sheets[0].ShowGridLines || wb.Sheets[2].ShowGridLines {
-		t.Errorf("reopened = %v/%v, want true/false", wb.Sheets[0].ShowGridLines, wb.Sheets[2].ShowGridLines)
+	if wb.Sheets[0].HideGridLines || !wb.Sheets[2].HideGridLines {
+		t.Errorf("reopened HideGridLines = %v/%v, want false/true", wb.Sheets[0].HideGridLines, wb.Sheets[2].HideGridLines)
 	}
 	if wb.Sheets[0].FrozenRows != 1 {
 		t.Errorf("pane lost: FrozenRows = %d", wb.Sheets[0].FrozenRows)

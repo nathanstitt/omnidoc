@@ -40,8 +40,11 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
     byte-identical. calc can push every sheet's facts on every save.
   - `MoveSheet`/`DeleteSheet` keep sheet-local defined names (such as `_FilterDatabase`) on their
     sheet.
-- Known gap: `SetName` does not rewrite the old sheet name in formulas or defined names (omnidoc
-  backlog X1). After calc renames a sheet, its `_FilterDatabase` name keeps the old sheet name.
+- `SetName` rewrites the sheet's own `_FilterDatabase` (and print) names. Known gap: it does not
+  rewrite the old sheet name in cell formulas or other defined names (omnidoc backlog X1).
+- A review pass (tinycld) found 13 issues; all are fixed in PR #176. They include: a pivot with a
+  calculated cache field can be re-added; a typed edit of a filter column read with `Raw` is
+  written; and `SetAutoFilter(nil)` on a sheet without a filter keeps an Advanced Filter's name.
 
 ---
 
@@ -52,8 +55,9 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
   - Write: add `SheetEdit.SetShowGridLines(bool)`. Keep all other `sheetView` attributes and
     children (`pane`, `selection`).
   - Reference file: sheets 2 and 3 set `showGridLines="0"`. calc shows gridlines on them.
-  - **Built:** as proposed, plus a reader `SheetEdit.ShowGridLines()`. The write changes every
-    `sheetView` of the sheet.
+  - **Built:** the read field is `Sheet.HideGridLines` (true for `showGridLines="0"`), so a
+    zero-value `Sheet` shows gridlines. The editor has `SheetEdit.ShowGridLines()` and
+    `SetShowGridLines(bool)` as proposed. The write changes every `sheetView` of the sheet.
 
 ## 2. AutoFilter
 

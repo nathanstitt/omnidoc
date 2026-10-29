@@ -257,28 +257,55 @@ func TestPivotCacheFieldNames(t *testing.T) {
 		t.Errorf("derived names = %q, want %q", read.CacheFields, want)
 	}
 
-	// A producer's own names (Google's "12/6/24") survive remove-then-add.
-	named := base
-	named.CacheFields = []string{"K", " ", " 2", " 3", "12/6/24"}
-	named.Values = []PivotValueField{{Field: "12/6/24"}}
-	f3, _ := Edit(context.Background(), data)
-	if err := f3.AddPivotTable(named); err != nil {
-		t.Fatal(err)
-	}
-	f4, _ := Edit(context.Background(), mustSave(t, f3))
-	if got := f4.PivotTables()[0]; !reflect.DeepEqual(got.CacheFields, named.CacheFields) || got.Values[0].Field != "12/6/24" {
-		t.Errorf("verbatim names = %q, value %q", got.CacheFields, got.Values[0].Field)
-	}
-
-	for name, bad := range map[string][]string{
-		"short":     {"K", " "},
-		"duplicate": {"K", " ", " ", " 3", "x"},
+	// A producer's own names survive remove-then-add while they still name
+	// their header: Google's "12/6/24" for the date header, " 2" for the
+	// second " ". A name that no longer matches (the header was renamed)
+	// gives way to the header text, and a short list names only its columns.
+	for _, tc := range []struct {
+		name  string
+		cache []string
+		want  []string
+	}{
+		{"verbatim", []string{"K", " ", " 2", " 22", "12/6/24"}, []string{"K", " ", " 2", " 22", "12/6/24"}},
+		{"renamed header", []string{"Key", " ", " 2", " 22", "11/6/24"}, []string{"K", " ", " 2", " 22", "2024-12-06"}},
+		{"short", []string{"K", " "}, []string{"K", " ", " 2", " 22", "2024-12-06"}},
+		{"duplicate", []string{"K", " ", " ", " 22", "12/6/24"}, []string{"K", " ", " 2", " 22", "12/6/24"}},
 	} {
 		pt := base
-		pt.CacheFields = bad
-		f5, _ := Edit(context.Background(), data)
-		if err := f5.AddPivotTable(pt); err == nil {
-			t.Errorf("%s CacheFields accepted", name)
+		pt.CacheFields = tc.cache
+		pt.Values = []PivotValueField{{Field: tc.want[4]}}
+		g, _ := Edit(context.Background(), data)
+		if err := g.AddPivotTable(pt); err != nil {
+			t.Fatalf("%s: %v", tc.name, err)
 		}
+		h, _ := Edit(context.Background(), mustSave(t, g))
+		if got := h.PivotTables()[0].CacheFields; !reflect.DeepEqual(got, tc.want) {
+			t.Errorf("%s: names = %q, want %q", tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestPivotCalculatedFieldReAdd: a calculated (or grouping) cache field,
+// databaseField="0", is not a source column, so it is not in CacheFields and
+// remove-then-add still works.
+func TestPivotCalculatedFieldReAdd(t *testing.T) {
+	f, err := Edit(context.Background(), calcPivotFixture())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cache := `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<pivotCacheDefinition xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cacheSource type="worksheet"><worksheetSource ref="A1:D2" sheet="Data"/></cacheSource><cacheFields count="5"><cacheField name="Region"/><cacheField name="Product"/><cacheField name="Sales"/><cacheField name="Margin"/><cacheField name="Double" formula="Sales*2" databaseField="0"/></cacheFields></pivotCacheDefinition>`
+	if err := f.setPart("xl/pivotCache/pivotCacheDefinition1.xml", []byte(cache)); err != nil {
+		t.Fatal(err)
+	}
+	pt := f.PivotTables()[0]
+	if want := []string{"Region", "Product", "Sales", "Margin"}; !reflect.DeepEqual(pt.CacheFields, want) {
+		t.Errorf("CacheFields = %q, want %q", pt.CacheFields, want)
+	}
+	if err := f.RemovePivotTables(); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.AddPivotTable(pt); err != nil {
+		t.Fatalf("re-add with a calculated cache field: %v", err)
 	}
 }

@@ -155,12 +155,12 @@ trusting any entry that has aged** — grep for the claimed symptom first.
 
 ## XLSX editor
 
-- ☐ **X1. Sheet rename does not rewrite references.** *Medium.* `SheetEdit.SetName` changes only the
-  workbook `<sheet name>`. Excel also rewrites the old name in every formula, defined-name
-  `refersTo` (the autoFilter's `_xlnm._FilterDatabase` among them), pivot cache source, and
-  conditional-format or validation formula. Here they keep the old name and point at a sheet that
-  no longer exists. The lexical shifter in `formula.go` already separates sheet names from the rest
-  of a reference and is the starting point.
+- ☐ **X1. Sheet rename does not rewrite most references.** *Medium.* `SheetEdit.SetName` rewrites
+  only the renamed sheet's own built-in local names (`_xlnm._FilterDatabase`, `Print_Area`,
+  `Print_Titles`). Excel also rewrites the old name in every cell formula, other defined names,
+  pivot cache sources, and conditional-format or validation formulas. Here they keep the old name
+  and point at a sheet that no longer exists. `renameSheetRefs` (boundary-aware, skips string
+  literals) does the rewrite and can be applied to those.
 
 ## Pagination — structural
 

@@ -109,6 +109,12 @@ func New() *File {
 	return f
 }
 
+// minimalStyles is the smallest valid styles part: Calibri 11, the two
+// required fills, one empty border, and xf 0.
+const minimalStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs></styleSheet>
+`
+
 // blankWorkbook assembles the minimal valid package New edits.
 func blankWorkbook() []byte {
 	parts := []struct{ name, data string }{
@@ -138,9 +144,7 @@ func blankWorkbook() []byte {
 		{"xl/worksheets/sheet1.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData/></worksheet>
 `},
-		{"xl/styles.xml", `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellXfs></styleSheet>
-`},
+		{"xl/styles.xml", minimalStyles},
 	}
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
@@ -579,19 +583,39 @@ func (f *File) DeleteSheet(name string) error {
 		}
 		return old
 	})
-	// The active and first-visible tab indices shift the same way; a deleted
-	// active tab passes to the sheet that took its place (the last one when
-	// it was last).
-	remaining := len(xmlpart.Children(xmlpart.FindChild(wb.Root(), "sheets"), "sheet"))
+	// The active and first-visible tab indices shift the same way. A deleted
+	// active tab passes, as in Excel, to the next visible sheet (the
+	// previous one when none follows), which also becomes the selected tab.
+	remaining := xmlpart.Children(xmlpart.FindChild(wb.Root(), "sheets"), "sheet")
+	successor := min(idx, len(remaining)-1)
+	visibleAt := func(i int) bool {
+		st := remaining[i].SelectAttrValue("state", "")
+		return st == "" || st == "visible"
+	}
+	found := false
+	for i := idx; i < len(remaining) && !found; i++ {
+		if visibleAt(i) {
+			successor, found = i, true
+		}
+	}
+	for i := min(idx, len(remaining)) - 1; i >= 0 && !found; i-- {
+		if visibleAt(i) {
+			successor, found = i, true
+		}
+	}
+	wasActive := f.activeTab() == idx
 	f.remapBookViews(func(old int) int {
 		switch {
 		case old > idx:
 			return old - 1
 		case old == idx:
-			return min(idx, remaining-1)
+			return successor
 		}
 		return old
 	})
+	if wasActive && successor >= 0 && successor < len(remaining) {
+		f.selectTab(remaining[successor].SelectAttrValue("name", ""))
+	}
 
 	if rels, err := f.mutatePart("xl/_rels/workbook.xml.rels"); err == nil {
 		for _, ch := range xmlpart.Children(rels.Root(), "Relationship") {
@@ -657,6 +681,47 @@ func (f *File) MoveSheet(name string, index int) error {
 	// in the tab bar) follows its sheet too.
 	f.remapBookViews(remap)
 	return nil
+}
+
+// activeTab is the first workbookView's activeTab (0 when absent).
+func (f *File) activeTab() int {
+	wb, err := f.part("xl/workbook.xml")
+	if err != nil {
+		return 0
+	}
+	if views := xmlpart.FindChild(wb.Root(), "bookViews"); views != nil {
+		if view := xmlpart.FindChild(views, "workbookView"); view != nil {
+			n, _ := strconv.Atoi(view.SelectAttrValue("activeTab", "0"))
+			return n
+		}
+	}
+	return 0
+}
+
+// selectTab marks a sheet's first sheetView tabSelected="1", as the sheet
+// that becomes active after the active one is deleted. A sheet without a
+// sheetView is left alone (no view is created for it).
+func (f *File) selectTab(name string) {
+	sh, err := f.Sheet(name)
+	if err != nil {
+		return
+	}
+	root, err := sh.doc()
+	if err != nil {
+		return
+	}
+	views := xmlpart.FindChild(root, "sheetViews")
+	if views == nil {
+		return
+	}
+	view := xmlpart.FindChild(views, "sheetView")
+	if view == nil || onOff(view.SelectAttrValue("tabSelected", "")) {
+		return
+	}
+	if root, err = sh.mut(); err != nil {
+		return
+	}
+	xmlpart.FindChild(xmlpart.FindChild(root, "sheetViews"), "sheetView").CreateAttr("tabSelected", "1")
 }
 
 // remapBookViews rewrites every workbookView's activeTab and firstSheet

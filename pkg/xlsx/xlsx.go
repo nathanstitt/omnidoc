@@ -101,9 +101,11 @@ type Sheet struct {
 	TabColorRGB string
 	// FrozenRows/FrozenCols are the frozen-pane split counts (0 = no freeze).
 	FrozenRows, FrozenCols int
-	// ShowGridLines is the first sheetView's showGridLines flag: true unless
-	// the sheet sets showGridLines="0" (the OOXML default is to show them).
-	ShowGridLines bool
+	// HideGridLines reports the first sheetView's showGridLines="0": the
+	// sheet hides its gridlines. False (the zero value, and the OOXML
+	// default) shows them. The editor reads and writes the same fact as
+	// SheetEdit.ShowGridLines/SetShowGridLines.
+	HideGridLines bool
 	// RowHeights maps a ZERO-based row index to its explicit height in points
 	// (only rows that declare one).
 	RowHeights map[int]float64

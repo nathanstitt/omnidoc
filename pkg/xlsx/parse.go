@@ -528,11 +528,13 @@ type sharedMaster struct {
 // single sheet can be most of a workbook, so per-sheet checks alone would let
 // one hostile part run unbounded.
 func parseSheet(ctx context.Context, data []byte, shared []string, styles styleTable, date1904 bool) (Sheet, error) {
-	sheet := Sheet{ShowGridLines: true}
+	var sheet Sheet
 	var cells []rawCell
 	maxRow, maxCol := -1, -1
 	sharedMasters := map[int]sharedMaster{}
 	seenView := false
+	colStyles := map[int]int{} // zero-based column -> <col style> xf
+	rowXfs := map[int]int{}    // zero-based row -> row xf (customFormat rows)
 	baseColWidth := defaultBaseColWidth
 
 	dec := xml.NewDecoder(bytes.NewReader(data))
@@ -579,9 +581,9 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 				if err := cancelled(ctx); err != nil {
 					return Sheet{}, err
 				}
-				parseRowElement(e, &sheet, styles)
+				parseRowElement(e, &sheet, styles, rowXfs)
 			case "col":
-				parseColElement(e, &sheet)
+				parseColElement(e, &sheet, colStyles)
 			case "sheetView":
 				// Only the first view counts (one per workbook view; the editor
 				// reads the same one).
@@ -589,7 +591,7 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 					seenView = true
 					for _, a := range e.Attr {
 						if a.Name.Local == "showGridLines" {
-							sheet.ShowGridLines = onOffDefault(a.Value, true)
+							sheet.HideGridLines = !onOffDefault(a.Value, true)
 						}
 					}
 				}
@@ -669,14 +671,22 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 	if maxRow < 0 || maxCol < 0 {
 		return sheet, nil
 	}
-	// Padding cells are unstyled (xf 0), so they carry xf 0's style: the
-	// Cell.Style contract is that it is never nil.
-	pad := Cell{Style: styles.styleFor(0)}
+	// A padding cell (no <c> element) shows the style an empty cell has in
+	// Excel: its row's style (customFormat), else its column's <col style>,
+	// else xf 0. Cell.Style is never nil.
 	grid := make([][]Cell, maxRow+1)
 	for i := range grid {
 		grid[i] = make([]Cell, maxCol+1)
+		rowXf, rowStyled := rowXfs[i]
 		for j := range grid[i] {
-			grid[i][j] = pad
+			xf := 0
+			switch colXf, colStyled := colStyles[j]; {
+			case rowStyled:
+				xf = rowXf
+			case colStyled:
+				xf = colXf
+			}
+			grid[i][j] = Cell{StyleID: xf, Style: styles.styleFor(xf)}
 		}
 	}
 	for _, c := range cells {
@@ -700,7 +710,7 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 }
 
 // parseRowElement reads a row's explicit height and row-level style.
-func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable) {
+func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable, rowXfs map[int]int) {
 	rowNum := -1
 	var ht float64
 	hasHt := false
@@ -732,6 +742,7 @@ func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable) {
 		sheet.RowHeights[rowNum] = ht
 	}
 	if customFormat && styleIdx >= 0 {
+		rowXfs[rowNum] = styleIdx
 		if s := styles.styleFor(styleIdx); s != nil {
 			if sheet.RowStyles == nil {
 				sheet.RowStyles = map[int]*Style{}
@@ -742,10 +753,11 @@ func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable) {
 }
 
 // parseColElement expands a <col min..max> width declaration per column.
-func parseColElement(e xml.StartElement, sheet *Sheet) {
+func parseColElement(e xml.StartElement, sheet *Sheet, colStyles map[int]int) {
 	minCol, maxCol := -1, -1
 	var width float64
 	hasWidth := false
+	style, hasStyle := 0, false
 	for _, a := range e.Attr {
 		switch a.Name.Local {
 		case "min":
@@ -760,9 +772,13 @@ func parseColElement(e xml.StartElement, sheet *Sheet) {
 			if f, err := strconv.ParseFloat(a.Value, 64); err == nil {
 				width, hasWidth = f, true
 			}
+		case "style":
+			if n, err := strconv.Atoi(a.Value); err == nil && n > 0 {
+				style, hasStyle = n, true
+			}
 		}
 	}
-	if !hasWidth || minCol < 0 || maxCol < minCol || minCol >= maxSheetCols {
+	if minCol < 0 || maxCol < minCol || minCol >= maxSheetCols || (!hasWidth && !hasStyle) {
 		return
 	}
 	// Guard against a min..max covering the full 16384-column sheet: only the
@@ -770,11 +786,16 @@ func parseColElement(e xml.StartElement, sheet *Sheet) {
 	if maxCol > maxSheetCols-1 {
 		maxCol = maxSheetCols - 1
 	}
-	if sheet.ColWidths == nil {
+	if hasWidth && sheet.ColWidths == nil {
 		sheet.ColWidths = map[int]float64{}
 	}
 	for c := minCol; c <= maxCol; c++ {
-		sheet.ColWidths[c] = width
+		if hasWidth {
+			sheet.ColWidths[c] = width
+		}
+		if hasStyle {
+			colStyles[c] = style
+		}
 	}
 }
 
