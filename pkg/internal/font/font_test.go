@@ -118,6 +118,29 @@ func TestType0Decodes(t *testing.T) {
 	}
 }
 
+// TestType0WithoutCmapDecodes covers a CIDFontType2 whose embedded TrueType
+// program has no cmap table. PDF does not require one there (glyphs come from
+// /CIDToGIDMap), so the font must load and draw instead of being rejected.
+func TestType0WithoutCmapDecodes(t *testing.T) {
+	doc, fd := fontDict(t, gen.EmbeddedType0NoCmapPDF())
+	src, err := New(doc, fd, nil, nil)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	glyphs := src.DecodeString(type0HelloCodes(t))
+	if len(glyphs) != 5 {
+		t.Fatalf("got %d glyphs, want 5", len(glyphs))
+	}
+	for i, g := range glyphs {
+		if g.Outline == nil {
+			t.Errorf("glyph %d: nil outline", i)
+		}
+		if g.Width <= 0 {
+			t.Errorf("glyph %d: non-positive width %v", i, g.Width)
+		}
+	}
+}
+
 // type0HelloCodes returns the Identity-H 2-byte codes (== GIDs) for "Hello" in
 // Roboto, matching what EmbeddedType0PDF draws.
 func type0HelloCodes(t *testing.T) []byte {

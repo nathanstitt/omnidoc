@@ -216,3 +216,38 @@ func collectionFace(data []byte, off uint32) []byte {
 	copy(out[:dirLen], data[off:int(off)+dirLen])
 	return out
 }
+
+// emptyCmap is a minimal cmap table that maps no character: version 0, one
+// (3,1) format-4 subtable at offset 12 holding only the required final segment
+// (0xFFFF..0xFFFF, idDelta 1, so it maps to GID 0).
+var emptyCmap = []byte{
+	0, 0, 0, 1, // version 0, numTables 1
+	0, 3, 0, 1, 0, 0, 0, 12, // platform 3, encoding 1, offset 12
+	0, 4, 0, 24, 0, 0, // format 4, length 24, language 0
+	0, 2, 0, 2, 0, 0, 0, 0, // segCountX2 2, searchRange 2, entrySelector 0, rangeShift 0
+	0xFF, 0xFF, 0, 0, // endCode[0] 0xFFFF, reservedPad
+	0xFF, 0xFF, 0, 1, 0, 0, // startCode[0] 0xFFFF, idDelta 1, idRangeOffset 0
+}
+
+// withCmap returns an sfnt that has a cmap table, for the TrueType parser,
+// which rejects a font without one. A PDF-embedded TrueType program often has
+// no cmap: PDF 32000-1 §9.9 does not require it for a CIDFontType2 font, whose
+// glyphs come from /CIDToGIDMap, and subsetters drop it from simple fonts too.
+// When data has a cmap, or is not a single-face sfnt, it is returned unchanged;
+// otherwise the sfnt is rebuilt with emptyCmap added, so every rune lookup
+// misses and glyph selection falls back to names, CIDToGIDMap, or raw codes.
+func withCmap(data []byte) []byte {
+	if len(data) < 4 || sfntHasTable(data, "cmap") {
+		return data
+	}
+	switch flavor := binary.BigEndian.Uint32(data[:4]); flavor {
+	case sigTrueType, sigTrue, sigOTTO:
+		tables, _, err := ParseSFNTTables(data)
+		if err != nil {
+			return data
+		}
+		tables["cmap"] = emptyCmap
+		return BuildSFNT(flavor, tables)
+	}
+	return data
+}

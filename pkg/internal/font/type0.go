@@ -71,7 +71,7 @@ func embeddedCIDProgram(doc *pdf.Document, cidFont pdf.Dict) (*program, error) {
 		if derr != nil {
 			return nil, ErrUnsupportedFontProgram
 		}
-		return parseProgram(b, progTrueType)
+		return parseProgram(withCmap(b), progTrueType)
 	}
 	if s := doc.GetStream(desc["FontFile3"]); s != nil {
 		b, _, derr := doc.DecodedStream(s)
@@ -80,7 +80,7 @@ func embeddedCIDProgram(doc *pdf.Document, cidFont pdf.Dict) (*program, error) {
 		}
 		sub, _ := doc.GetName(s.Dict["Subtype"])
 		if sub == "OpenType" {
-			return parseProgram(b, progTrueType)
+			return parseProgram(withCmap(b), progTrueType)
 		}
 		return parseProgram(b, progCFF)
 	}

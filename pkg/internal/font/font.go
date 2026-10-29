@@ -74,7 +74,7 @@ func embeddedSimpleProgram(doc *pdf.Document, fontDict pdf.Dict) (*program, erro
 		if derr != nil {
 			return nil, fmt.Errorf("%w: FontFile2: %v", ErrUnsupportedFontProgram, derr)
 		}
-		return parseProgram(b, progTrueType)
+		return parseProgram(withCmap(b), progTrueType)
 	}
 	if s := doc.GetStream(desc["FontFile3"]); s != nil {
 		b, _, derr := doc.DecodedStream(s)
@@ -83,7 +83,7 @@ func embeddedSimpleProgram(doc *pdf.Document, fontDict pdf.Dict) (*program, erro
 		}
 		sub, _ := doc.GetName(s.Dict["Subtype"])
 		if sub == "OpenType" {
-			return parseProgram(b, progTrueType)
+			return parseProgram(withCmap(b), progTrueType)
 		}
 		return parseProgram(b, progCFF)
 	}

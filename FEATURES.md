@@ -51,7 +51,9 @@ What is *not* done yet, and the known approximations, live in the per-subsystem 
   `/BBox` clip.
 - **Fonts** (`github.com/benoitkugler/textlayout`): embedded TrueType (FontFile2), CFF/Type1C
   (FontFile3), classic Type1 (FontFile, eexec), Type0/CIDFont (Identity-H/V), and symbolic subset
-  TrueType. **A malformed font program cannot take the process down**: the upstream parser indexes
+  TrueType. An embedded sfnt with no `cmap` table (PDF does not require one for CIDFontType2) loads
+  with an empty `cmap` added, so glyphs come from `/CIDToGIDMap`, glyph names, or raw codes; web
+  fonts without a `cmap` are still rejected, as browsers do. **A malformed font program cannot take the process down**: the upstream parser indexes
   its tables without checking, so a self-inconsistent cmap subtable slices at a negative bound and
   panics (found by fuzzing). The parse is recovered and reported as a load failure — the same guard
   this package already applied to `FontHExtents`/`FontVExtents`, extended to the entry point. It
