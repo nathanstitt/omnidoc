@@ -198,10 +198,35 @@ func pfbToRaw(pfb []byte) (raw []byte, l1, l2, l3 int) {
 // Identity-H encoding and a CIDFontType2 descendant embedding Roboto
 // (FontFile2), with CIDToGIDMap /Identity. The show-string is the 2-byte GIDs of
 // a few letters, so it exercises the composite glyph path without a cmap step.
-func EmbeddedType0PDF() []byte {
+func EmbeddedType0PDF() []byte { return embeddedType0PDF(robotoTTF) }
+
+// EmbeddedType0NoCmapPDF is EmbeddedType0PDF with an embedded program that has
+// no cmap table, as many PDF producers write for CIDFontType2 fonts (PDF
+// 32000-1 §9.9 does not require one there).
+func EmbeddedType0NoCmapPDF() []byte { return embeddedType0PDF(withoutCmap(robotoTTF)) }
+
+// withoutCmap returns a copy of an sfnt whose cmap directory entry is renamed
+// to an unknown tag, so parsers no longer see a cmap. Table offsets and every
+// other table stay the same.
+func withoutCmap(ttf []byte) []byte {
+	out := append([]byte(nil), ttf...)
+	n := int(binary.BigEndian.Uint16(out[4:]))
+	for i := 0; i < n; i++ {
+		rec := out[12+16*i:]
+		if string(rec[0:4]) == "cmap" {
+			copy(rec[0:4], "xmap")
+			return out
+		}
+	}
+	panic("gen: no cmap table in TTF")
+}
+
+// embeddedType0PDF builds the EmbeddedType0PDF page around the given embedded
+// program. GIDs and widths always come from the full Roboto program.
+func embeddedType0PDF(program []byte) []byte {
 	b := newBuilder()
 
-	fontFile := b.addStream(fmt.Sprintf(" /Length1 %d", len(robotoTTF)), robotoTTF)
+	fontFile := b.addStream(fmt.Sprintf(" /Length1 %d", len(program)), program)
 	descNum := b.addObject(fmt.Sprintf(
 		"<< /Type /FontDescriptor /FontName /Roboto-Regular /Flags 32 "+
 			"/FontBBox [-681 -271 1535 1061] /ItalicAngle 0 /Ascent 1061 /Descent -271 "+

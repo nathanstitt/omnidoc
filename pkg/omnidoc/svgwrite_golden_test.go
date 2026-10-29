@@ -3,9 +3,16 @@ package omnidoc
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"image"
 	"image/color"
+	"image/draw"
+	"image/png"
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 
 	"github.com/nathanstitt/omnidoc/testdata/gen"
@@ -86,9 +93,10 @@ func TestSVGWriteGolden(t *testing.T) {
 			if err != nil {
 				t.Fatalf("read %s: %v", path, err)
 			}
-			if !bytes.Equal(want, buf.Bytes()) {
+			want, got := normalizePNGURIs(t, want), normalizePNGURIs(t, buf.Bytes())
+			if !bytes.Equal(want, got) {
 				t.Errorf("emitted SVG differs from golden %s (%s).\nRegenerate with -update and review the diff.\n%s",
-					path, f.why, firstDiff(want, buf.Bytes()))
+					path, f.why, firstDiff(want, got))
 			}
 		})
 	}
@@ -122,6 +130,31 @@ func TestSVGWriteGoldenIsDeterministic(t *testing.T) {
 			t.Fatalf("run %d differs from run 0: output is not deterministic\n%s", i, firstDiff(first, buf.Bytes()))
 		}
 	}
+}
+
+// pngURI matches a base64 PNG data URI as WriteSVG emits it for raster content.
+var pngURI = regexp.MustCompile(`data:image/png;base64,[A-Za-z0-9+/=]+`)
+
+// normalizePNGURIs replaces each PNG data URI in svg with a digest of its
+// decoded pixels. The PNG bytes depend on the compress/flate encoder, which
+// changes between Go releases, so the golden compares what the image holds,
+// not how it was compressed.
+func normalizePNGURIs(t *testing.T, svg []byte) []byte {
+	t.Helper()
+	return pngURI.ReplaceAllFunc(svg, func(uri []byte) []byte {
+		raw, err := base64.StdEncoding.DecodeString(string(uri[len("data:image/png;base64,"):]))
+		if err != nil {
+			t.Fatalf("decode PNG data URI: %v", err)
+		}
+		img, err := png.Decode(bytes.NewReader(raw))
+		if err != nil {
+			t.Fatalf("decode PNG: %v", err)
+		}
+		b := img.Bounds()
+		rgba := image.NewNRGBA(image.Rect(0, 0, b.Dx(), b.Dy()))
+		draw.Draw(rgba, rgba.Bounds(), img, b.Min, draw.Src)
+		return fmt.Appendf(nil, "png:%dx%d:%x", b.Dx(), b.Dy(), sha256.Sum256(rgba.Pix))
+	})
 }
 
 // firstDiff reports the first differing line, with context, so a golden failure
