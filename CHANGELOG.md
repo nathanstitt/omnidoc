@@ -8,6 +8,73 @@ release receives fixes.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] — 2026-10-29
+
+No breaking API changes: `gorelease -base=v1.0.0` reports only additions. The behaviour
+changes listed under "Changed" fix bugs or match what Excel does.
+
+### Added
+
+- **PDF images in every structure output.** PDF → HTML, Markdown, DOCX, PPTX, EPUB, and RTF
+  now keep each painted image, in reading order, with its orientation (`/Rotate`, CTM) and
+  clip box. Plain text and CSV/TSV/XLSX omit images by design. Images under 2 pt are skipped.
+- `HTMLWriteOptions` and `MarkdownOptions` take `ImageDir`/`ImageRef`, and the CLI takes
+  `--images-dir DIR` for md/html output, to save embedded images as files and link them
+  instead of inlining `data:` URIs.
+- **`pkg/xlsx` sheet facts**, read on both the `Workbook` and the editor:
+  - `Sheet.HideGridLines`, with `SheetEdit.ShowGridLines`/`SetShowGridLines`.
+  - `Sheet.AutoFilter`, with `SheetEdit.AutoFilter`/`SetAutoFilter`. Every filter kind is
+    typed, with a verbatim `Raw` passthrough. The hidden `_xlnm._FilterDatabase` name follows
+    the filter.
+  - `Sheet.Hyperlinks`, with `SheetEdit.Hyperlinks`/`SetHyperlinks` (external URLs through
+    the sheet relationships).
+  - `SheetEdit.DefaultRowHeight`/`DefaultColWidth`, with `SetDefaultRowHeight` and
+    `SetDefaultColWidth`.
+- **`pkg/xlsx` workbook facts:** `Workbook.DefaultFont` and `File.DefaultFont()` (the Normal
+  style's font). `Serial1900`/`SerialFrom1900` convert serials for a `Date1904` workbook.
+- **`pkg/xlsx` pivot layout**, read and written by `AddPivotTable`, so it survives a
+  remove-then-add save:
+  - the `x="-2"` Values placeholder (`ValuesAxis`/`ValuesPosition`);
+  - `PivotValueField.NumFmt`;
+  - `AxisSort` and `LocationInfo`;
+  - the data, header, grand-total, missing, and error captions;
+  - `CacheFields`, which keeps the producer's cache field names.
+- `testdata/xlsx/google-export.xlsx`: an anonymized Google Sheets export, with the facts
+  above pinned against it.
+
+### Changed
+
+- `Sheet.DefaultColWidth` is never 0. A sheet that declares no `defaultColWidth` gets the
+  width Excel derives from `baseColWidth` and the default font (9.140625 for Calibri 11 or
+  Arial 10).
+- `Style.Font` fills a missing size or name from the workbook default font.
+- Grid cells with no `<c>` element carry a style (the row's, else the column's, else xf 0),
+  so `Cell.Style` is never nil, as documented.
+- `PivotTables()` no longer lists the Values placeholder as an empty-named axis field.
+- `AddPivotTable` names cache fields by the header's display text (a numeric header was
+  `FieldN`), numbers repeated headers (`" "`, `" 2"`), and writes the Values placeholder when a
+  table has two or more value fields.
+- A style edit, or a custom pivot number format, on a workbook with no styles part creates
+  the part instead of failing. `NumFmt: "General"` maps to id 0 instead of a custom record.
+
+### Fixed
+
+- An embedded TrueType/OpenType font with no `cmap` table (allowed for CIDFontType2) loads.
+- `pkg/xlsx` editor:
+  - `r:id` attributes on a sheet the editor created had no `xmlns:r` declaration (seen with
+    `SetComment`).
+  - `MoveSheet`/`DeleteSheet` left `localSheetId`, `activeTab`, and `firstSheet` on the wrong
+    sheet.
+  - `SetName` left the sheet's own `_FilterDatabase` and print names on the old name.
+  - Hyperlink targets without `TargetMode` read differently in the two views.
+  - ISO-strict hyperlinks did not resolve.
+
+### Security
+
+- `golang.org/x/net` v0.62.0 fixes GO-2026-6866 and GO-2026-6860, which reach `html.Parse` and
+  `html.Render`.
+- CI and release builds use the latest Go 1.26 patch, for the standard-library advisories.
+
 ## [1.0.0] — 2026-09-01
 
 ### Changed — BREAKING
@@ -153,6 +220,7 @@ Three of the defects were in dependencies rather than in this code.
 Releases up to 0.1.1 predate this changelog; see the git history and the release
 notes on GitHub for what they contained.
 
+[1.1.0]: https://github.com/nathanstitt/omnidoc/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/nathanstitt/omnidoc/compare/v0.1.1...v1.0.0
 [0.1.1]: https://github.com/nathanstitt/omnidoc/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/nathanstitt/omnidoc/compare/v0.0.6...v0.1.0
