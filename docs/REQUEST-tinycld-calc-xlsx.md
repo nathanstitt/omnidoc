@@ -12,24 +12,29 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## Status (2026-10-29)
 
-- All items are implemented and in review in
+- Items 1–9 are all implemented and in review in
   [PR #176](https://github.com/nathanstitt/omnidoc/pull/176) (branch `xlsx-calc-requests`). They
   are not merged or released. Each item stays ◐ until a release contains it.
 - Each item has a **Built:** note where the API differs from the proposal.
-- Tests use synthetic fixtures with the same XML shapes as the reference file. The real-world
-  corpus covers autoFilter and hyperlinks.
-- Items 1, 2, 4, and 5 were checked against the anonymized reference export
-  (`calc/tests/assets/google-export.xlsx`):
+- The anonymized reference export is committed as `testdata/xlsx/google-export.xlsx` (repository
+  license). `pkg/xlsx/reference_test.go` pins items 1, 2, 4, and 5 against it, and also checks
+  calc's save loop: writing back every fact as read leaves the file byte-identical, and both
+  pivots survive remove-then-add unchanged. It checks:
   - Gridlines are off on sheets 2 and 3.
   - The autoFilter is `A1:BY35` and the frozen pane is 1×2.
   - The default font is Arial 10, and no cell font is left without a size.
   - The `x="-2"` placeholder reads as `ValuesAxis "col"`.
   - `numFmtId="164"` resolves to `"$"#,##0.00`.
-  - C34 is 7800.87 and BC34 is 420323.55.
+  - C34 is 7800.87, BC34 is 420323.55, and BG38 is 425717.05.
+  - BD2 is cached as `0.0152330746`, because Google rounds caches to ten digits. BC2/BC34 in full
+    precision is 0.015233074615971435.
+  - The pivot sheets have no cached output cells, so the 420323.55 grand total is checked as
+    SUM(BC2:BC33).
 - The check found one more gap, now fixed. A pivot re-add wrote 20 cache fields all named `" "`,
   and it named date headers `FieldN`. The new `PivotTable.CacheFields` keeps the cache names on
   re-add.
-- The file is not yet committed to omnidoc testdata. Its license must be decided first.
+- The file also showed that padding cells (cells with no `<c>` element) had a nil `Style`. They
+  now carry xf 0's style, so an unstyled cell draws in the default font (item 5).
 - Added on the omnidoc side, which calc can use:
   - Writing back an unchanged fact (gridlines, autoFilter, hyperlinks) leaves the sheet part
     byte-identical. calc can push every sheet's facts on every save.
@@ -90,7 +95,11 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
   `numFmtId` on the matching `<pivotField>`. Add `PivotValueField.NumFmt string` (the format code,
   resolved through the styles part the same way as `Style.NumFmt`). Reference file: every pivot
   field has `numFmtId="164"` (`"$"#,##0.00`).
-  - **Built:** as proposed. `AddPivotTable` writes it as the dataField `numFmtId`.
+  - Today calc falls back to the format of the first number cell in the source column. A value
+    field over a text column (reference file: "SUM of Employee") has no number cell, so calc
+    shows `0` where Excel and Google show `$0.00`.
+  - **Built:** as proposed. `AddPivotTable` writes it as the dataField `numFmtId`. "SUM of
+    Employee" reads `"$"#,##0.00` from its pivotField (pinned against the reference file).
 - ◐ **Axis item sort order.** Read `<pivotField sortType="ascending|descending">` for axis fields.
   Add a `Sort string` to an axis-field type (today axis fields are plain `[]string`, so this
   needs a small struct, for example `PivotAxisField{Name, Sort string}`).
@@ -127,22 +136,36 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
     only `baseColWidth`, or with no `sheetFormatPr`, now returns the derived width: the digits
     plus 5 px, rounded up to a multiple of 8 px as Excel does. Calibri 11 / Arial 10 → 9.140625.
 
----
+## 7. Sheet reorder and sheet-scoped names
 
-## 7. Sheet-local names after a sheet move
+- ◐ **`MoveSheet` must remap sheet indexes.** After a move, a defined name's `localSheetId` and
+  `<workbookView activeTab>` still hold the old index, so a sheet-scoped name can point at the
+  wrong sheet. calc now reorders sheets on save (it inserts a sheet for an imported pivot).
+  - **Built:** `MoveSheet` remaps `localSheetId`, `activeTab`, and `firstSheet`. `DeleteSheet`
+    does too: the deleted sheet's local names go, and a deleted active tab passes to the sheet that
+    takes its place.
 
-- ◐ **`MoveSheet` keeps `localSheetId` on its sheet.** Covered by PR #176 (`DeleteSheet` too).
+## 8. Sheet default sizes on write
 
-## 8. Write the sheet defaults
-
-- ☐ **`SheetEdit.SetDefaultRowHeight(pt)` / `SetDefaultColWidth(chars)`.** Write
-  `<sheetFormatPr>`. calc reads the defaults on import but cannot save a change. Not started.
+- ◐ **Add `SheetEdit.SetDefaultRowHeight(pt)` / `SetDefaultColWidth(chars)`** (writes
+  `<sheetFormatPr>`). calc reads the defaults on import; it cannot save a change to them yet.
+  - **Built:** as proposed, plus the readers `SheetEdit.DefaultRowHeight()`/`DefaultColWidth()`.
+    A height is (0, 409] pt and is written with `customHeight="1"`. A width is (0, 255]
+    characters. A sheet with no `sheetFormatPr` gets one with the required `defaultRowHeight`:
+    12.75 for an Arial 10 workbook, else 15.
 
 ## 9. 1904 date system
 
-- ☐ **A `KindDate` formula cache in a 1904 workbook is a 1904-system serial.** calc's formula
-  engine is 1900-based. Either convert, or document `Workbook.Date1904` as the switch that callers
-  apply to `Value.F`. Not started.
+- ◐ **Expose the date system per formula cache.** A `KindDate` cached value in a 1904 workbook is
+  a 1904-system serial. calc's formula engine uses the 1900 system. Either give the serial in the
+  1900 system, or keep `Workbook.Date1904` (already present) documented as the switch callers
+  must apply to `Value.F`.
+  - **Built:** `Value.F` stays the stored serial (documented on `Value.F` and
+    `Workbook.Date1904`). New `xlsx.Serial1900(serial, date1904)` converts to the 1900 system, and
+    `xlsx.SerialFrom1900` converts back before `SetNumber`. The offset is 1462 days. `Value.T`
+    was already correct in both systems.
+
+---
 
 ## Notes for later items
 

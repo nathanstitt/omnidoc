@@ -272,6 +272,111 @@ func (s *SheetEdit) gridLinesUniform(show bool) bool {
 	return true
 }
 
+// Excel's limits on the sheet default sizes.
+const (
+	maxRowHeightPt   = 409
+	maxColWidthChars = 255
+)
+
+// DefaultRowHeight reads the sheetFormatPr defaultRowHeight in points, or 0
+// when the sheet declares none (the same value as Sheet.DefaultRowHeight).
+func (s *SheetEdit) DefaultRowHeight() float64 {
+	root, err := s.doc()
+	if err != nil {
+		return 0
+	}
+	if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil {
+		if v, err := strconv.ParseFloat(pr.SelectAttrValue("defaultRowHeight", ""), 64); err == nil {
+			return v
+		}
+	}
+	return 0
+}
+
+// DefaultColWidth reads the default column width in characters: the
+// declared defaultColWidth, else the width derived from baseColWidth and the
+// workbook default font (the same value as Sheet.DefaultColWidth).
+func (s *SheetEdit) DefaultColWidth() float64 {
+	base := defaultBaseColWidth
+	if root, err := s.doc(); err == nil {
+		if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil {
+			if w, err := strconv.ParseFloat(pr.SelectAttrValue("defaultColWidth", ""), 64); err == nil && w > 0 {
+				return w
+			}
+			if n, err := strconv.Atoi(pr.SelectAttrValue("baseColWidth", "")); err == nil && n >= 0 && n <= 255 {
+				base = n
+			}
+		}
+	}
+	return derivedDefaultColWidth(base, s.file.DefaultFont())
+}
+
+// SetDefaultRowHeight sets the sheet's default row height in points (0 < pt
+// <= 409). It writes sheetFormatPr defaultRowHeight with customHeight="1",
+// which marks the height as set by hand, as Excel does. Every other
+// sheetFormatPr attribute is kept; an unchanged height leaves the part
+// untouched.
+func (s *SheetEdit) SetDefaultRowHeight(pt float64) error {
+	if !(pt > 0 && pt <= maxRowHeightPt) {
+		return fmt.Errorf("xlsx: default row height %v pt is outside (0, %d]", pt, maxRowHeightPt)
+	}
+	if s.DefaultRowHeight() == pt {
+		if root, err := s.doc(); err == nil {
+			if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil && onOff(pr.SelectAttrValue("customHeight", "")) {
+				return nil
+			}
+		}
+	}
+	pr, err := s.sheetFormatPr()
+	if err != nil {
+		return err
+	}
+	pr.CreateAttr("defaultRowHeight", trimFloat(pt))
+	pr.CreateAttr("customHeight", "1")
+	return nil
+}
+
+// SetDefaultColWidth sets the sheet's default column width in characters
+// (0 < chars <= 255), the unit of Sheet.DefaultColWidth and ColWidths. It
+// writes sheetFormatPr defaultColWidth, which takes precedence over
+// baseColWidth. Every other attribute is kept; an unchanged width leaves the
+// part untouched.
+func (s *SheetEdit) SetDefaultColWidth(chars float64) error {
+	if !(chars > 0 && chars <= maxColWidthChars) {
+		return fmt.Errorf("xlsx: default column width %v is outside (0, %d]", chars, maxColWidthChars)
+	}
+	if root, err := s.doc(); err == nil {
+		if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil {
+			if w, err := strconv.ParseFloat(pr.SelectAttrValue("defaultColWidth", ""), 64); err == nil && w == chars {
+				return nil
+			}
+		}
+	}
+	pr, err := s.sheetFormatPr()
+	if err != nil {
+		return err
+	}
+	pr.CreateAttr("defaultColWidth", trimFloat(chars))
+	return nil
+}
+
+// sheetFormatPr returns the sheet's <sheetFormatPr> for mutation, creating
+// it when absent. The schema requires defaultRowHeight, so a created element
+// carries Excel's default height for the workbook default font (see
+// excelDefaultRowHeight).
+func (s *SheetEdit) sheetFormatPr() (*etree.Element, error) {
+	root, err := s.mut()
+	if err != nil {
+		return nil, err
+	}
+	if pr := xmlpart.FindChild(root, "sheetFormatPr"); pr != nil {
+		return pr, nil
+	}
+	pr := xmlpart.EnsureChildInOrder(root, "sheetFormatPr", worksheetOrder)
+	pr.CreateAttr("defaultRowHeight", trimFloat(excelDefaultRowHeight(s.file.DefaultFont())))
+	return pr, nil
+}
+
 // activePane names the quadrant the cursor lives in after a freeze.
 func activePane(rows, cols int) string {
 	switch {

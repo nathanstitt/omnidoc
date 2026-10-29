@@ -669,9 +669,15 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 	if maxRow < 0 || maxCol < 0 {
 		return sheet, nil
 	}
+	// Padding cells are unstyled (xf 0), so they carry xf 0's style: the
+	// Cell.Style contract is that it is never nil.
+	pad := Cell{Style: styles.styleFor(0)}
 	grid := make([][]Cell, maxRow+1)
 	for i := range grid {
 		grid[i] = make([]Cell, maxCol+1)
+		for j := range grid[i] {
+			grid[i][j] = pad
+		}
 	}
 	for _, c := range cells {
 		// A shared-formula member carries no text of its own: expand the

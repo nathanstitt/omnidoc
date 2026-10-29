@@ -579,6 +579,19 @@ func (f *File) DeleteSheet(name string) error {
 		}
 		return old
 	})
+	// The active and first-visible tab indices shift the same way; a deleted
+	// active tab passes to the sheet that took its place (the last one when
+	// it was last).
+	remaining := len(xmlpart.Children(xmlpart.FindChild(wb.Root(), "sheets"), "sheet"))
+	f.remapBookViews(func(old int) int {
+		switch {
+		case old > idx:
+			return old - 1
+		case old == idx:
+			return min(idx, remaining-1)
+		}
+		return old
+	})
 
 	if rels, err := f.mutatePart("xl/_rels/workbook.xml.rels"); err == nil {
 		for _, ch := range xmlpart.Children(rels.Root(), "Relationship") {
@@ -633,13 +646,49 @@ func (f *File) MoveSheet(name string, index int) error {
 	for i, el := range xmlpart.Children(sheetsEl, "sheet") {
 		moved[before[el]] = i
 	}
-	f.remapLocalSheetIDs(func(old int) int {
+	remap := func(old int) int {
 		if n, ok := moved[old]; ok {
 			return n
 		}
 		return old
-	})
+	}
+	f.remapLocalSheetIDs(remap)
+	// The active tab stays on the same sheet. firstSheet (the first tab shown
+	// in the tab bar) follows its sheet too.
+	f.remapBookViews(remap)
 	return nil
+}
+
+// remapBookViews rewrites every workbookView's activeTab and firstSheet
+// through remap. An absent attribute counts as index 0 (the schema default);
+// an attribute remap leaves unchanged is not touched.
+func (f *File) remapBookViews(remap func(old int) int) {
+	wb, err := f.part("xl/workbook.xml")
+	if err != nil {
+		return
+	}
+	views := xmlpart.FindChild(wb.Root(), "bookViews")
+	if views == nil {
+		return
+	}
+	for _, view := range xmlpart.Children(views, "workbookView") {
+		for _, attr := range []string{"activeTab", "firstSheet"} {
+			raw := view.SelectAttrValue(attr, "")
+			old, err := strconv.Atoi(raw)
+			if raw == "" {
+				old, err = 0, nil
+			}
+			if err != nil {
+				continue
+			}
+			n := max(remap(old), 0)
+			if n == old {
+				continue
+			}
+			view.CreateAttr(attr, strconv.Itoa(n))
+			f.dirty["xl/workbook.xml"] = true
+		}
+	}
 }
 
 // remapLocalSheetIDs rewrites every sheet-local defined name's localSheetId

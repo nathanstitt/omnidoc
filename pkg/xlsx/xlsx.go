@@ -48,7 +48,10 @@ type Workbook struct {
 	// data is there for callers that want it).
 	Sheets []Sheet
 	// Date1904 selects the 1904 date system (old Mac Excel) for serial-date
-	// conversion.
+	// conversion. Value.T already accounts for it, but every serial in the
+	// file — Value.F of a KindDate, and a date-valued formula cache — counts
+	// from 1904-01-01. A 1900-based engine converts with Serial1900, and back
+	// with SerialFrom1900 before writing a serial with SetNumber.
 	Date1904 bool
 	// DefinedNames are the workbook's defined names in file order.
 	DefinedNames []DefinedName
@@ -185,7 +188,9 @@ type Value struct {
 	Kind Kind
 	// S is the string value (KindString) or error text (KindError).
 	S string
-	// F is the numeric value (KindNumber) or raw date serial (KindDate).
+	// F is the numeric value (KindNumber) or raw date serial (KindDate), as
+	// stored: in a Workbook.Date1904 workbook a date serial is 1904-based (see
+	// Serial1900).
 	F float64
 	// B is the boolean value (KindBool).
 	B bool

@@ -75,3 +75,16 @@ func derivedDefaultColWidth(baseColWidth int, defaultFont Font) float64 {
 	px = math.Ceil(px/8) * 8
 	return math.Floor(px/mdw*256) / 256
 }
+
+// excelDefaultRowHeight is the default row height, in points, Excel uses
+// for a default font: 15 for Calibri 11 and 12.75 for Arial 10, its two
+// standard defaults. Excel derives the height from hinted font metrics this
+// package does not have, so any other font gets 15 — the height of Excel's
+// current default. It is used only when a sheetFormatPr must be created and
+// the schema requires a height.
+func excelDefaultRowHeight(f Font) float64 {
+	if strings.EqualFold(strings.TrimSpace(f.Name), "arial") && f.Size == 10 {
+		return 12.75
+	}
+	return 15
+}

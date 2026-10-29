@@ -1295,7 +1295,8 @@ dependency is `x/image`, so no new transitive surface):
   header, and `" "`, `" 2"` for repeats. Without them, the header row's display text names the
   fields, and a numeric header is no longer an anonymous `FieldN`. Repeats are numbered left to
   right, so cache names stay unique. Before this, a source with 20 blank-looking headers wrote 20
-  cache fields named `" "`. Checked against calc's real Google Sheets export: both pivots survive
+  cache fields named `" "`. Checked against calc's real Google Sheets export
+  (`testdata/xlsx/google-export.xlsx`, pinned by `reference_test.go`): both pivots survive
   remove-then-add with every cache name unchanged.
 
 **XLSX sheet view, autoFilter, hyperlinks, default font** (`pkg/xlsx`, requested by tinycld calc):
@@ -1326,8 +1327,20 @@ dependency is `x/image`, so no new transitive surface):
   `r:id` the editor writes (sheet, pivot cache, legacy drawing, hyperlink) now reuses the bound
   prefix, transitional or strict, or declares one.
 - `MoveSheet` and `DeleteSheet` keep sheet-local defined names on their sheet: `localSheetId`
-  follows the move, and a deleted sheet's local names go, as in Excel. `SetName` does not yet
-  rewrite the old sheet name inside `refersTo` text.
+  follows the move, and a deleted sheet's local names go, as in Excel. Every `workbookView`'s
+  `activeTab` and `firstSheet` follow the same way; a deleted active tab passes to the sheet that
+  takes its place. `SetName` does not yet rewrite the old sheet name inside `refersTo` text.
+- `SheetEdit.DefaultRowHeight`/`DefaultColWidth` read the sheet defaults (the same values as the
+  `Sheet` fields), and `SetDefaultRowHeight(pt)`/`SetDefaultColWidth(chars)` write
+  `<sheetFormatPr>`. A row height must be above 0 and at most 409 pt, and is written with
+  `customHeight="1"`, as Excel does. A width must be above 0 and at most 255 characters. Other attributes stay, and an unchanged value leaves the part
+  byte-verbatim. A created `sheetFormatPr` needs the schema's required `defaultRowHeight`. It gets
+  Excel's 12.75 for an Arial 10 workbook, else 15 (Calibri 11). That is an approximation for other
+  fonts: Excel derives the height from hinted metrics this package does not have.
+- `Serial1900`/`SerialFrom1900` convert a serial between a `Date1904` workbook and the 1900
+  system (1462 days), for a 1900-based formula engine. `Value.F` stays the stored serial.
+- Grid padding cells (no `<c>` element) carry xf 0's style, so `Cell.Style` is never nil as
+  documented. Before, padding cells had a nil style.
 - `Workbook.DefaultFont` / `File.DefaultFont()` give the Normal style's font: the
   `builtinId="0"` cellStyle → its `cellStyleXfs` record → fonts, else record 0, else `fonts[0]`. A
   cell font with no `<sz>` or `<name>` resolves to the default font's size and family in
