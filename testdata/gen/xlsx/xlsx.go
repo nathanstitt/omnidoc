@@ -19,6 +19,12 @@ type Builder struct {
 	styles        string
 	date1904      bool
 	definedNames  string
+	extra         []extraPart
+}
+
+// extraPart is a part beyond the workbook core (sheet rels, pivot parts, ...).
+type extraPart struct {
+	name, contentType, xml string
 }
 
 type sheet struct {
@@ -54,6 +60,16 @@ func (b *Builder) SetDate1904() *Builder { b.date1904 = true; return b }
 // SetDefinedNames sets the workbook's <definedNames> children (raw
 // <definedName ...>...</definedName> XML; empty = no element).
 func (b *Builder) SetDefinedNames(xml string) *Builder { b.definedNames = xml; return b }
+
+// AddPart adds any other part by its package name (for example
+// "xl/worksheets/_rels/sheet1.xml.rels" or "xl/pivotTables/pivotTable1.xml").
+// A non-empty contentType registers an Override for it; parts with an
+// extension Default (.rels, .xml) can pass "". Parts are written after the
+// core parts, in call order.
+func (b *Builder) AddPart(name, contentType, xml string) *Builder {
+	b.extra = append(b.extra, extraPart{name: name, contentType: contentType, xml: xml})
+	return b
+}
 
 // Bytes serializes the package deterministically.
 func (b *Builder) Bytes() []byte {
@@ -106,6 +122,9 @@ func (b *Builder) Bytes() []byte {
 	if b.styles != "" {
 		parts = append(parts, part{"xl/styles.xml", b.styles})
 	}
+	for _, e := range b.extra {
+		parts = append(parts, part{e.name, e.xml})
+	}
 
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
@@ -141,6 +160,11 @@ func contentTypes(b *Builder) string {
 	}
 	if b.styles != "" {
 		sb.WriteString(`<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>` + "\n")
+	}
+	for _, e := range b.extra {
+		if e.contentType != "" {
+			fmt.Fprintf(&sb, `<Override PartName="/%s" ContentType="%s"/>`+"\n", e.name, e.contentType)
+		}
 	}
 	sb.WriteString("</Types>\n")
 	return sb.String()

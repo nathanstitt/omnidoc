@@ -52,6 +52,12 @@ type Workbook struct {
 	Date1904 bool
 	// DefinedNames are the workbook's defined names in file order.
 	DefinedNames []DefinedName
+	// DefaultFont is the workbook default font: the font of the Normal cell
+	// style (cellStyleXfs record of the builtinId-0 cellStyle, normally
+	// fonts[0]). It is the zero Font when the workbook has no styles part.
+	// A cell font record without a size or name resolves to this font's size
+	// and name in Style.Font, and Sheet.DefaultColWidth derives from it.
+	DefaultFont Font
 }
 
 // DefinedName is one workbook-defined name (a named range or expression).
@@ -92,6 +98,9 @@ type Sheet struct {
 	TabColorRGB string
 	// FrozenRows/FrozenCols are the frozen-pane split counts (0 = no freeze).
 	FrozenRows, FrozenCols int
+	// ShowGridLines is the first sheetView's showGridLines flag: true unless
+	// the sheet sets showGridLines="0" (the OOXML default is to show them).
+	ShowGridLines bool
 	// RowHeights maps a ZERO-based row index to its explicit height in points
 	// (only rows that declare one).
 	RowHeights map[int]float64
@@ -101,15 +110,30 @@ type Sheet struct {
 	// ColWidths maps a zero-based column index to its explicit width in Excel
 	// character units (<col> ranges expanded per column).
 	ColWidths map[int]float64
-	// DefaultRowHeight/DefaultColWidth are the sheet defaults (sheetFormatPr);
+	// DefaultRowHeight is the sheetFormatPr defaultRowHeight in points, or
 	// zero when the sheet declares none.
-	DefaultRowHeight, DefaultColWidth float64
+	DefaultRowHeight float64
+	// DefaultColWidth is the default column width in character units (the
+	// unit of ColWidths: widths of the default font's widest digit, padding
+	// included). It is sheetFormatPr defaultColWidth verbatim when declared;
+	// otherwise it is derived from baseColWidth (8 when absent) and
+	// Workbook.DefaultFont as Excel does — baseColWidth digits plus 5 px of
+	// padding, rounded up to a multiple of 8 px — so it is never zero. For
+	// Calibri 11 or Arial 10 that is 9.140625 (Excel's UI shows "8.43", which
+	// excludes the padding).
+	DefaultColWidth float64
 	// CondFmts are the sheet's conditional-formatting blocks, with each rule
 	// carrying both its typed fields and the verbatim XML (CFRule.Raw) for
 	// lossless passthrough.
 	CondFmts []ConditionalFormatting
 	// Comments are the sheet's classic cell notes (1-based coordinates).
 	Comments []Comment
+	// AutoFilter is the sheet's filter range and column criteria, or nil.
+	// The matching hidden _xlnm._FilterDatabase name is in
+	// Workbook.DefinedNames.
+	AutoFilter *AutoFilter
+	// Hyperlinks are the sheet's cell hyperlinks in file order.
+	Hyperlinks []Hyperlink
 }
 
 // Cell is one cell's display value plus the presentation facts conversion
@@ -317,7 +341,13 @@ type relationship struct {
 	ID     string `xml:"Id,attr"`
 	Type   string `xml:"Type,attr"`
 	Target string `xml:"Target,attr"`
+	// TargetMode is "External" for a target outside the package (a URL);
+	// such a target is kept verbatim, not resolved as a part name.
+	TargetMode string `xml:"TargetMode,attr"`
 }
+
+// external reports whether the relationship points outside the package.
+func (r relationship) external() bool { return r.TargetMode == "External" }
 
 // relsOf unmarshals a part's .rels file (dir/_rels/base.rels), keyed by id.
 func (p *pkgReader) relsOf(partName string) map[string]relationship {
@@ -334,7 +364,11 @@ func (p *pkgReader) relsOf(partName string) map[string]relationship {
 	}
 	out := make(map[string]relationship, len(doc.Rels))
 	for _, r := range doc.Rels {
-		r.Target = joinPart(dir, r.Target)
+		// A hyperlink's target is a URL (or a link relative to the file),
+		// never a package part: keep it as written, as the editor does.
+		if !r.external() && !isHyperlinkRel(r.Type) {
+			r.Target = joinPart(dir, r.Target)
+		}
 		out[r.ID] = r
 	}
 	return out

@@ -32,6 +32,48 @@ type PivotTable struct {
 	RowGrandTotals, ColGrandTotals bool
 	// StyleName is the pivot style ("PivotStyleLight16" when empty on write).
 	StyleName string
+
+	// ValuesAxis is the axis that holds the "Values" pseudo-field — the
+	// <field x="-2"/> placeholder that marks where the data-field captions go:
+	// "col", "row", or "" when the table has none. The placeholder is never a
+	// member of Rows or Cols. On write the placeholder is emitted only for two
+	// or more Values (Excel writes none for one); "" then places it last on
+	// the column axis (Excel's default).
+	ValuesAxis string
+	// ValuesPosition is the placeholder's index on ValuesAxis: the number of
+	// Rows (or Cols) fields before it. On write it is clamped to the axis.
+	ValuesPosition int
+	// AxisSort maps an axis field's source-column name to the sort order of
+	// its items ("ascending" or "descending", from pivotField sortType).
+	// Fields in manual (file) order are absent.
+	AxisSort map[string]string
+	// LocationInfo is the <location> band offsets. A read always sets it. On
+	// write, nil keeps the default single-header layout (1, 2, 1).
+	LocationInfo *PivotLocation
+
+	// DataCaption is the "Values" caption ("Values" when empty on write).
+	DataCaption string
+	// RowHeaderCaption/ColHeaderCaption replace the "Row Labels"/"Column
+	// Labels" headers, or "".
+	RowHeaderCaption, ColHeaderCaption string
+	// GrandTotalCaption replaces the "Grand Total" label, or "".
+	GrandTotalCaption string
+	// MissingCaption is the text shown in empty value cells ("" = blank).
+	// HideMissing is showMissing="0": empty cells do not use MissingCaption.
+	MissingCaption string
+	HideMissing    bool
+	// ErrorCaption is the text shown in error value cells when ShowError is
+	// set.
+	ErrorCaption string
+	ShowError    bool
+}
+
+// PivotLocation is the band layout of a pivot's <location>: the offsets,
+// from the top-left of the Location range, of the first header row, first
+// data row, and first data column, plus the page-field (filter) area shape.
+type PivotLocation struct {
+	FirstHeaderRow, FirstDataRow, FirstDataCol int
+	RowPageCount, ColPageCount                 int
 }
 
 // PivotValueField is one aggregated field.
@@ -45,6 +87,10 @@ type PivotValueField struct {
 	// DisplayName is the data field's shown name ("Sum of X" style; derived
 	// when empty).
 	DisplayName string
+	// NumFmt is the value cells' number format code (resolved through the
+	// styles part like Style.NumFmt), or "" for General. On read it comes from
+	// the dataField's numFmtId, else the source field's pivotField numFmtId.
+	NumFmt string
 }
 
 const (
@@ -58,6 +104,9 @@ const (
 	spreadsheetMainXNS = `xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"`
 	relationshipsXNS   = `xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"`
 )
+
+// valuesFieldIndex is the rowFields/colFields x of the "Values" placeholder.
+const valuesFieldIndex = -2
 
 // sheetRelTargets resolves EVERY relationship of relType on a sheet part.
 func (f *File) sheetRelTargets(sheetPart, relType string) []string {
@@ -107,16 +156,33 @@ func (f *File) readPivotTable(partName, targetSheet string) (PivotTable, bool) {
 		return PivotTable{}, false
 	}
 	var doc struct {
-		Name           string `xml:"name,attr"`
-		CacheID        int    `xml:"cacheId,attr"`
-		RowGrandTotals string `xml:"rowGrandTotals,attr"`
-		ColGrandTotals string `xml:"colGrandTotals,attr"`
-		Location       struct {
-			Ref string `xml:"ref,attr"`
+		Name              string `xml:"name,attr"`
+		CacheID           int    `xml:"cacheId,attr"`
+		RowGrandTotals    string `xml:"rowGrandTotals,attr"`
+		ColGrandTotals    string `xml:"colGrandTotals,attr"`
+		DataOnRows        string `xml:"dataOnRows,attr"`
+		DataPosition      *int   `xml:"dataPosition,attr"`
+		DataCaption       string `xml:"dataCaption,attr"`
+		RowHeaderCaption  string `xml:"rowHeaderCaption,attr"`
+		ColHeaderCaption  string `xml:"colHeaderCaption,attr"`
+		GrandTotalCaption string `xml:"grandTotalCaption,attr"`
+		MissingCaption    string `xml:"missingCaption,attr"`
+		ShowMissing       string `xml:"showMissing,attr"`
+		ErrorCaption      string `xml:"errorCaption,attr"`
+		ShowError         string `xml:"showError,attr"`
+		Location          struct {
+			Ref            string `xml:"ref,attr"`
+			FirstHeaderRow int    `xml:"firstHeaderRow,attr"`
+			FirstDataRow   int    `xml:"firstDataRow,attr"`
+			FirstDataCol   int    `xml:"firstDataCol,attr"`
+			RowPageCount   int    `xml:"rowPageCount,attr"`
+			ColPageCount   int    `xml:"colPageCount,attr"`
 		} `xml:"location"`
 		PivotFields struct {
 			Field []struct {
-				Axis string `xml:"axis,attr"`
+				Axis     string `xml:"axis,attr"`
+				NumFmtID *int   `xml:"numFmtId,attr"`
+				SortType string `xml:"sortType,attr"`
 			} `xml:"pivotField"`
 		} `xml:"pivotFields"`
 		RowFields struct {
@@ -139,6 +205,7 @@ func (f *File) readPivotTable(partName, targetSheet string) (PivotTable, bool) {
 				Name     string `xml:"name,attr"`
 				Fld      int    `xml:"fld,attr"`
 				Subtotal string `xml:"subtotal,attr"`
+				NumFmtID *int   `xml:"numFmtId,attr"`
 			} `xml:"dataField"`
 		} `xml:"dataFields"`
 		Style struct {
@@ -157,6 +224,22 @@ func (f *File) readPivotTable(partName, targetSheet string) (PivotTable, bool) {
 		// The OOXML default for the grand-total attributes is TRUE.
 		RowGrandTotals: doc.RowGrandTotals == "" || onOff(doc.RowGrandTotals),
 		ColGrandTotals: doc.ColGrandTotals == "" || onOff(doc.ColGrandTotals),
+
+		DataCaption:       doc.DataCaption,
+		RowHeaderCaption:  doc.RowHeaderCaption,
+		ColHeaderCaption:  doc.ColHeaderCaption,
+		GrandTotalCaption: doc.GrandTotalCaption,
+		MissingCaption:    doc.MissingCaption,
+		HideMissing:       !onOffDefault(doc.ShowMissing, true),
+		ErrorCaption:      doc.ErrorCaption,
+		ShowError:         onOff(doc.ShowError),
+		LocationInfo: &PivotLocation{
+			FirstHeaderRow: doc.Location.FirstHeaderRow,
+			FirstDataRow:   doc.Location.FirstDataRow,
+			FirstDataCol:   doc.Location.FirstDataCol,
+			RowPageCount:   doc.Location.RowPageCount,
+			ColPageCount:   doc.Location.ColPageCount,
+		},
 	}
 
 	// The cache definition supplies the source range and the field names.
@@ -191,23 +274,60 @@ func (f *File) readPivotTable(partName, targetSheet string) (PivotTable, bool) {
 		}
 		return ""
 	}
+	// x="-2" is the "Values" placeholder, not a cache field: it records
+	// where the data-field captions go instead of joining the axis.
 	for _, rf := range doc.RowFields.Field {
+		if rf.X == valuesFieldIndex {
+			pt.ValuesAxis, pt.ValuesPosition = "row", len(pt.Rows)
+			continue
+		}
 		pt.Rows = append(pt.Rows, fieldName(rf.X))
 	}
 	for _, cf := range doc.ColFields.Field {
+		if cf.X == valuesFieldIndex {
+			pt.ValuesAxis, pt.ValuesPosition = "col", len(pt.Cols)
+			continue
+		}
 		pt.Cols = append(pt.Cols, fieldName(cf.X))
+	}
+	if pt.ValuesAxis == "" && onOff(doc.DataOnRows) && len(doc.DataFields.Field) > 1 {
+		// No placeholder element, but the table says the values are on rows.
+		// (Excel keeps dataOnRows after a table drops to one value, where
+		// there is no Values field to place.)
+		pt.ValuesAxis, pt.ValuesPosition = "row", len(pt.Rows)
+		if doc.DataPosition != nil && *doc.DataPosition >= 0 && *doc.DataPosition < len(pt.Rows) {
+			pt.ValuesPosition = *doc.DataPosition
+		}
 	}
 	for _, pf := range doc.PageFields.Field {
 		pt.Filters = append(pt.Filters, fieldName(pf.Fld))
 	}
+	for i, pf := range doc.PivotFields.Field {
+		if pf.Axis == "" {
+			continue
+		}
+		if pf.SortType == "ascending" || pf.SortType == "descending" {
+			if pt.AxisSort == nil {
+				pt.AxisSort = map[string]string{}
+			}
+			pt.AxisSort[fieldName(i)] = pf.SortType
+		}
+	}
+	custom := f.resolvedStyles().customFmt
 	for _, df := range doc.DataFields.Field {
 		agg := df.Subtotal
 		if agg == "" {
 			agg = "sum"
 		}
-		pt.Values = append(pt.Values, PivotValueField{
-			Field: fieldName(df.Fld), Aggregation: agg, DisplayName: df.Name,
-		})
+		v := PivotValueField{Field: fieldName(df.Fld), Aggregation: agg, DisplayName: df.Name}
+		fmtID := df.NumFmtID
+		if fmtID == nil && df.Fld >= 0 && df.Fld < len(doc.PivotFields.Field) {
+			fmtID = doc.PivotFields.Field[df.Fld].NumFmtID
+		}
+		if fmtID != nil {
+			v.NumFmt = resolveNumFmt(*fmtID, custom)
+		}
+		pt.Values = append(pt.Values, v)
 	}
 	return pt, true
 }
@@ -376,10 +496,32 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 	if err != nil {
 		return err
 	}
+	switch pt.ValuesAxis {
+	case "", "row", "col":
+	default:
+		return fmt.Errorf("xlsx: pivot ValuesAxis %q is not \"row\" or \"col\"", pt.ValuesAxis)
+	}
+	sortOf := map[int]string{}
+	onAxis := map[string]bool{}
+	for _, names := range [][]string{pt.Rows, pt.Cols, pt.Filters} {
+		for _, n := range names {
+			onAxis[n] = true
+		}
+	}
+	for name, order := range pt.AxisSort {
+		if order != "ascending" && order != "descending" {
+			return fmt.Errorf("xlsx: pivot sort %q for field %q is not \"ascending\" or \"descending\"", order, name)
+		}
+		if !onAxis[name] {
+			return fmt.Errorf("xlsx: pivot sort field %q is not an axis field", name)
+		}
+		sortOf[fieldIdx[name]] = order
+	}
 	type dataField struct {
 		idx     int
 		agg     string
 		display string
+		fmtID   int
 	}
 	var dataFields []dataField
 	for _, v := range pt.Values {
@@ -396,6 +538,20 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 			display = strings.ToUpper(agg[:1]) + agg[1:] + " of " + v.Field
 		}
 		dataFields = append(dataFields, dataField{idx: idx, agg: agg, display: display})
+	}
+	// Number formats resolve only after every check passed, so a refused
+	// table leaves the styles part untouched. General and builtin codes need
+	// no styles part at all.
+	for i, v := range pt.Values {
+		if id, ok := builtinNumFmtID(v.NumFmt); ok {
+			dataFields[i].fmtID = id
+			continue
+		}
+		root, err := f.stylesRoot()
+		if err != nil {
+			return err
+		}
+		dataFields[i].fmtID = numFmtIDFor(root, v.NumFmt)
 	}
 
 	// Allocate part names and ids.
@@ -472,10 +628,63 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 	}
 	var tb strings.Builder
 	tb.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>` + "\n")
+	dataCaption := pt.DataCaption
+	if dataCaption == "" {
+		dataCaption = "Values"
+	}
+	// The "Values" placeholder exists only with two or more value fields
+	// (Excel writes none for one): where asked, else last on the column axis
+	// (Excel's default).
+	valuesAxis, valuesPos := pt.ValuesAxis, pt.ValuesPosition
+	switch {
+	case len(dataFields) < 2:
+		valuesAxis = ""
+	case valuesAxis == "":
+		valuesAxis, valuesPos = "col", len(colIdx)
+	}
+	axisLen := len(colIdx)
+	if valuesAxis == "row" {
+		axisLen = len(rowIdx)
+	}
+	valuesPos = max(0, min(valuesPos, axisLen))
 	tb.WriteString(`<pivotTableDefinition ` + spreadsheetMainXNS + ` name="` + xmlEscape(pt.Name) +
-		`" cacheId="` + strconv.Itoa(cacheID) + `" dataCaption="Values"` +
-		` rowGrandTotals="` + gt(pt.RowGrandTotals) + `" colGrandTotals="` + gt(pt.ColGrandTotals) + `">`)
-	tb.WriteString(`<location ref="` + xmlEscape(pt.Location) + `" firstHeaderRow="1" firstDataRow="2" firstDataCol="1"/>`)
+		`" cacheId="` + strconv.Itoa(cacheID) + `" dataCaption="` + xmlEscape(dataCaption) + `"`)
+	optAttr := func(name, v string) {
+		if v != "" {
+			tb.WriteString(` ` + name + `="` + xmlEscape(v) + `"`)
+		}
+	}
+	optAttr("grandTotalCaption", pt.GrandTotalCaption)
+	if pt.ShowError {
+		tb.WriteString(` showError="1"`)
+	}
+	optAttr("errorCaption", pt.ErrorCaption)
+	if pt.HideMissing {
+		tb.WriteString(` showMissing="0"`)
+	}
+	optAttr("missingCaption", pt.MissingCaption)
+	if valuesAxis == "row" {
+		tb.WriteString(` dataOnRows="1"`)
+	}
+	if valuesAxis != "" && valuesPos < axisLen {
+		tb.WriteString(` dataPosition="` + strconv.Itoa(valuesPos) + `"`)
+	}
+	optAttr("rowHeaderCaption", pt.RowHeaderCaption)
+	optAttr("colHeaderCaption", pt.ColHeaderCaption)
+	tb.WriteString(` rowGrandTotals="` + gt(pt.RowGrandTotals) + `" colGrandTotals="` + gt(pt.ColGrandTotals) + `">`)
+	loc := PivotLocation{FirstHeaderRow: 1, FirstDataRow: 2, FirstDataCol: 1}
+	if pt.LocationInfo != nil {
+		loc = *pt.LocationInfo
+	}
+	tb.WriteString(`<location ref="` + xmlEscape(pt.Location) + `" firstHeaderRow="` + strconv.Itoa(loc.FirstHeaderRow) +
+		`" firstDataRow="` + strconv.Itoa(loc.FirstDataRow) + `" firstDataCol="` + strconv.Itoa(loc.FirstDataCol) + `"`)
+	if loc.RowPageCount > 0 {
+		tb.WriteString(` rowPageCount="` + strconv.Itoa(loc.RowPageCount) + `"`)
+	}
+	if loc.ColPageCount > 0 {
+		tb.WriteString(` colPageCount="` + strconv.Itoa(loc.ColPageCount) + `"`)
+	}
+	tb.WriteString(`/>`)
 	tb.WriteString(`<pivotFields count="` + strconv.Itoa(len(fields)) + `">`)
 	for i := range fields {
 		tb.WriteString("<pivotField")
@@ -485,9 +694,21 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 		if inData[i] {
 			tb.WriteString(` dataField="1"`)
 		}
+		if order, ok := sortOf[i]; ok {
+			tb.WriteString(` sortType="` + order + `"`)
+		}
 		tb.WriteString(` showAll="0"/>`)
 	}
 	tb.WriteString(`</pivotFields>`)
+	// The "Values" placeholder splices into its axis at valuesPos.
+	withValues := func(idxs []int, axis string) []int {
+		if valuesAxis != axis {
+			return idxs
+		}
+		out := append([]int{}, idxs[:valuesPos]...)
+		out = append(out, valuesFieldIndex)
+		return append(out, idxs[valuesPos:]...)
+	}
 	writeAxisFields := func(el, item string, idxs []int) {
 		if len(idxs) == 0 {
 			return
@@ -498,8 +719,8 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 		}
 		tb.WriteString(`</` + el + `>`)
 	}
-	writeAxisFields("rowFields", "field", rowIdx)
-	writeAxisFields("colFields", "field", colIdx)
+	writeAxisFields("rowFields", "field", withValues(rowIdx, "row"))
+	writeAxisFields("colFields", "field", withValues(colIdx, "col"))
 	if len(pageIdx) > 0 {
 		tb.WriteString(`<pageFields count="` + strconv.Itoa(len(pageIdx)) + `">`)
 		for _, i := range pageIdx {
@@ -514,7 +735,11 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 			if df.agg != "sum" {
 				tb.WriteString(` subtotal="` + xmlEscape(df.agg) + `"`)
 			}
-			tb.WriteString(` baseField="0" baseItem="0"/>`)
+			tb.WriteString(` baseField="0" baseItem="0"`)
+			if df.fmtID != 0 {
+				tb.WriteString(` numFmtId="` + strconv.Itoa(df.fmtID) + `"`)
+			}
+			tb.WriteString(`/>`)
 		}
 		tb.WriteString(`</dataFields>`)
 	}
@@ -540,7 +765,7 @@ func (f *File) AddPivotTable(pt PivotTable) error {
 	if err != nil {
 		return err
 	}
-	if err := target.addSheetRel(relPivotTable, tablePart); err != nil {
+	if _, err := target.addSheetRel(relPivotTable, tablePart); err != nil {
 		return err
 	}
 	ct, err := f.mutatePart("[Content_Types].xml")
@@ -596,7 +821,7 @@ func (f *File) registerPivotCache(cachePart string) (int, error) {
 	}
 	pc := etree.NewElement("pivotCache")
 	pc.CreateAttr("cacheId", strconv.Itoa(maxCache+1))
-	pc.CreateAttr("r:id", rid)
+	pc.CreateAttr(relIDAttr(wb.Root()), rid)
 	pcs.AddChild(pc)
 	return maxCache + 1, nil
 }
@@ -609,39 +834,25 @@ var workbookOrder = []string{
 	"webPublishing", "fileRecoveryPr", "webPublishObjects", "extLst",
 }
 
-// addSheetRel appends a relationship on the sheet's rels part (created when
-// absent), returning nothing; ids allocate past the current maximum.
-func (s *SheetEdit) addSheetRel(relType, target string) error {
-	relsName := sheetRelsName(s.partName)
-	if !s.file.partExists(relsName) {
-		s.file.added[relsName] = []byte(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-</Relationships>
-`)
-	}
-	rels, err := s.file.mutatePart(relsName)
+// addSheetRel appends a relationship to an internal part on the sheet's rels
+// part (created when absent) and returns its id, allocated past the current
+// maximum.
+func (s *SheetEdit) addSheetRel(relType, target string) (string, error) {
+	rels, err := s.sheetRels()
 	if err != nil {
-		return err
-	}
-	maxRel := 0
-	for _, ch := range xmlpart.Children(rels.Root(), "Relationship") {
-		id := ch.SelectAttrValue("Id", "")
-		if strings.HasPrefix(id, "rId") {
-			if n, err := strconv.Atoi(id[3:]); err == nil && n > maxRel {
-				maxRel = n
-			}
-		}
+		return "", err
 	}
 	relTarget, err := relPath(path.Dir(s.partName), target)
 	if err != nil {
-		return err
+		return "", err
 	}
+	id := nextRelID(rels)
 	el := etree.NewElement("Relationship")
-	el.CreateAttr("Id", fmt.Sprintf("rId%d", maxRel+1))
+	el.CreateAttr("Id", id)
 	el.CreateAttr("Type", relType)
 	el.CreateAttr("Target", relTarget)
-	rels.Root().AddChild(el)
-	return nil
+	rels.AddChild(el)
+	return id, nil
 }
 
 // SetDefinedNames replaces the workbook's defined names wholesale.

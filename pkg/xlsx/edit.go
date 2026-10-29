@@ -512,7 +512,7 @@ func (f *File) AddSheet(name string) (*SheetEdit, error) {
 	sheetEl := etree.NewElement("sheet")
 	sheetEl.CreateAttr("name", name)
 	sheetEl.CreateAttr("sheetId", strconv.Itoa(maxID+1))
-	sheetEl.CreateAttr("r:id", rid)
+	sheetEl.CreateAttr(relIDAttr(wb.Root()), rid)
 	xmlpart.FindChild(wb.Root(), "sheets").AddChild(sheetEl)
 	f.dirty["xl/workbook.xml"] = true
 
@@ -557,6 +557,10 @@ func (f *File) DeleteSheet(name string) error {
 		return err
 	}
 	rid := sheetEl.SelectAttrValue("id", "")
+	idx, err := f.sheetIndex(name)
+	if err != nil {
+		return err
+	}
 
 	wb, _, err := f.workbookSheets()
 	if err != nil {
@@ -564,6 +568,17 @@ func (f *File) DeleteSheet(name string) error {
 	}
 	xmlpart.Remove(xmlpart.FindChild(wb.Root(), "sheets"), sheetEl)
 	f.dirty["xl/workbook.xml"] = true
+	// Sheet-local names follow their sheet: the deleted sheet's go (as in
+	// Excel), later sheets' indices shift down by one.
+	f.remapLocalSheetIDs(func(old int) int {
+		switch {
+		case old == idx:
+			return -1
+		case old > idx:
+			return old - 1
+		}
+		return old
+	})
 
 	if rels, err := f.mutatePart("xl/_rels/workbook.xml.rels"); err == nil {
 		for _, ch := range xmlpart.Children(rels.Root(), "Relationship") {
@@ -600,6 +615,10 @@ func (f *File) MoveSheet(name string, index int) error {
 	if index < 0 || index >= len(sheets) {
 		return fmt.Errorf("%w: sheet index %d of %d", ErrBadRef, index, len(sheets))
 	}
+	before := make(map[*etree.Element]int, len(sheets))
+	for i, el := range sheets {
+		before[el] = i
+	}
 	sheetsEl := xmlpart.FindChild(wb.Root(), "sheets")
 	xmlpart.Remove(sheetsEl, sheetEl)
 	remaining := sheetsEl.ChildElements()
@@ -609,7 +628,49 @@ func (f *File) MoveSheet(name string, index int) error {
 		xmlpart.InsertBefore(sheetsEl, sheetEl, remaining[index])
 	}
 	f.dirty["xl/workbook.xml"] = true
+	// Sheet-local names keep pointing at the same sheet at its new index.
+	moved := map[int]int{}
+	for i, el := range xmlpart.Children(sheetsEl, "sheet") {
+		moved[before[el]] = i
+	}
+	f.remapLocalSheetIDs(func(old int) int {
+		if n, ok := moved[old]; ok {
+			return n
+		}
+		return old
+	})
 	return nil
+}
+
+// remapLocalSheetIDs rewrites every sheet-local defined name's localSheetId
+// through remap (old index to new; a negative result drops the name). Names
+// remap leaves alone are not touched.
+func (f *File) remapLocalSheetIDs(remap func(old int) int) {
+	wb, err := f.part("xl/workbook.xml")
+	if err != nil {
+		return
+	}
+	dn := xmlpart.FindChild(wb.Root(), "definedNames")
+	if dn == nil {
+		return
+	}
+	for _, el := range xmlpart.Children(dn, "definedName") {
+		old, err := strconv.Atoi(el.SelectAttrValue("localSheetId", ""))
+		if err != nil {
+			continue
+		}
+		switch n := remap(old); {
+		case n < 0:
+			xmlpart.Remove(dn, el)
+			f.dirty["xl/workbook.xml"] = true
+		case n != old:
+			el.CreateAttr("localSheetId", strconv.Itoa(n))
+			f.dirty["xl/workbook.xml"] = true
+		}
+	}
+	if len(dn.ChildElements()) == 0 {
+		xmlpart.Remove(wb.Root(), dn)
+	}
 }
 
 // sharedString resolves a shared-string index for typed reads, parsing the

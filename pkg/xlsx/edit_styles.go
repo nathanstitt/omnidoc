@@ -93,6 +93,9 @@ func (f *File) resolvedStyles() styleTable {
 	return f.styleCache
 }
 
+// DefaultFont reads the workbook default font (see Workbook.DefaultFont).
+func (f *File) DefaultFont() Font { return f.resolvedStyles().defaultFont }
+
 // CellStyle reads a cell's fully resolved style (the zero Style for an
 // unstyled cell).
 func (s *SheetEdit) CellStyle(row, col int) Style {
@@ -510,17 +513,27 @@ func applyAlignmentPatch(xf *etree.Element, p *AlignmentPatch) {
 	}
 }
 
+// builtinNumFmtID maps "" and "General" to id 0 and a builtin code to its
+// lowest builtin id (ascending for determinism); ok is false for a custom
+// code.
+func builtinNumFmtID(code string) (int, bool) {
+	if code == "" || strings.EqualFold(code, "General") {
+		return 0, true
+	}
+	for id := 1; id <= 49; id++ {
+		if builtinNumFmtAll[id] == code {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 // numFmtIDFor resolves a format pattern to an id: exact builtin match (ids
 // ascending for determinism), an existing custom entry with the same code,
 // else a freshly allocated id >= 164 appended to <numFmts>.
 func numFmtIDFor(root *etree.Element, code string) int {
-	if code == "" {
-		return 0
-	}
-	for id := 1; id <= 49; id++ {
-		if builtinNumFmtAll[id] == code {
-			return id
-		}
+	if id, ok := builtinNumFmtID(code); ok {
+		return id
 	}
 	numFmts := xmlpart.FindChild(root, "numFmts")
 	maxID := 163

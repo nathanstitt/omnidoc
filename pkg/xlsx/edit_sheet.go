@@ -208,6 +208,70 @@ func (s *SheetEdit) SetFrozen(rows, cols int) {
 	view.InsertChildAt(0, pane)
 }
 
+// ShowGridLines reports the first sheetView's showGridLines flag (true when
+// the attribute or the view is absent — the OOXML default).
+func (s *SheetEdit) ShowGridLines() bool {
+	root, err := s.doc()
+	if err != nil {
+		return true
+	}
+	if views := xmlpart.FindChild(root, "sheetViews"); views != nil {
+		if view := xmlpart.FindChild(views, "sheetView"); view != nil {
+			return onOffDefault(view.SelectAttrValue("showGridLines", ""), true)
+		}
+	}
+	return true
+}
+
+// SetShowGridLines shows or hides the sheet's gridlines on every sheetView.
+// Hiding writes showGridLines="0" (creating the view when the sheet has
+// none); showing removes the attribute, restoring the default. Every other
+// sheetView attribute and child (pane, selection) is kept. A call that
+// changes nothing leaves the part untouched.
+func (s *SheetEdit) SetShowGridLines(show bool) {
+	if s.gridLinesUniform(show) {
+		return
+	}
+	root, err := s.mut()
+	if err != nil {
+		return
+	}
+	views := xmlpart.EnsureChildInOrder(root, "sheetViews", worksheetOrder)
+	if len(xmlpart.Children(views, "sheetView")) == 0 {
+		view := etree.NewElement("sheetView")
+		view.CreateAttr("workbookViewId", "0")
+		views.AddChild(view)
+	}
+	for _, view := range xmlpart.Children(views, "sheetView") {
+		if show {
+			view.RemoveAttr("showGridLines")
+		} else {
+			view.CreateAttr("showGridLines", "0")
+		}
+	}
+}
+
+// gridLinesUniform reports whether every sheetView already matches show.
+func (s *SheetEdit) gridLinesUniform(show bool) bool {
+	root, err := s.doc()
+	if err != nil {
+		return false
+	}
+	var list []*etree.Element
+	if views := xmlpart.FindChild(root, "sheetViews"); views != nil {
+		list = xmlpart.Children(views, "sheetView")
+	}
+	if len(list) == 0 {
+		return show // no view reads as shown; hiding must create one
+	}
+	for _, view := range list {
+		if onOffDefault(view.SelectAttrValue("showGridLines", ""), true) != show {
+			return false
+		}
+	}
+	return true
+}
+
 // activePane names the quadrant the cursor lives in after a freeze.
 func activePane(rows, cols int) string {
 	switch {
