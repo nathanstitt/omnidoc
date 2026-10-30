@@ -169,6 +169,28 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
     `xlsx.SerialFrom1900` converts back before `SetNumber`. The offset is 1462 days. `Value.T`
     was already correct in both systems.
 
+## 10. Hidden rows and columns
+
+- ☐ **Read and write the hidden flag on rows and columns.** A row is hidden by
+  `<row r="5" hidden="1">`, and a column by `<col min="3" max="3" hidden="1">`. Google and Excel
+  write `hidden="1"` for rows that a filter hides and for rows or columns that the user hid. Today
+  `parseRowElement` reads only `ht`, `s`, and `customFormat`, and `parseColElement` reads only
+  `min`, `max`, `width`, and `style`. The flag is lost on import, so calc shows every hidden row.
+  The editor keeps the attribute on save, but calc cannot read it or set it.
+  - Proposed read API: `Sheet.HiddenRows map[int]bool` and `Sheet.HiddenCols map[int]bool`
+    (zero-based, like `RowHeights` and `ColWidths`). A hidden row with no `ht` must still show in
+    `HiddenRows`.
+  - Proposed write API: `SheetEdit.SetRowHidden(row int, hidden bool)` and
+    `SheetEdit.SetColHidden(col int, hidden bool)`, plus the readers `RowHidden(row)` and
+    `ColHidden(col)`. `SetColHidden` splits a `<col>` range the same way `SetColWidth` does.
+    Unhiding removes the attribute. When nothing changes, the sheet part stays byte-identical.
+  - The row's `ht` stays as it is, so unhiding a row gives back its height. Today calc saves a
+    row that a filter hides as `ht="0" customHeight="1"`, which loses the height. calc will
+    change to `SetRowHidden` when this item is released.
+  - Reference file: the export has no hidden rows. A test file needs a filtered row
+    (`hidden="1"` inside the autoFilter range), a hand-hidden row outside it, and a hidden column
+    range `min..max` that is wider than one column.
+
 ---
 
 ## Notes for later items
