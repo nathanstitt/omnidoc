@@ -709,11 +709,13 @@ func parseSheet(ctx context.Context, data []byte, shared []string, styles styleT
 	return sheet, nil
 }
 
-// parseRowElement reads a row's explicit height and row-level style.
+// parseRowElement reads a row's explicit height, hidden flag, and row-level
+// style.
 func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable, rowXfs map[int]int) {
 	rowNum := -1
 	var ht float64
 	hasHt := false
+	hidden := false
 	styleIdx := -1
 	customFormat := false
 	for _, a := range e.Attr {
@@ -730,10 +732,18 @@ func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable, rowXfs
 			styleIdx, _ = strconv.Atoi(a.Value)
 		case "customFormat":
 			customFormat = onOff(a.Value)
+		case "hidden":
+			hidden = onOff(a.Value)
 		}
 	}
 	if rowNum < 0 {
 		return
+	}
+	if hidden {
+		if sheet.HiddenRows == nil {
+			sheet.HiddenRows = map[int]bool{}
+		}
+		sheet.HiddenRows[rowNum] = true
 	}
 	if hasHt {
 		if sheet.RowHeights == nil {
@@ -752,11 +762,13 @@ func parseRowElement(e xml.StartElement, sheet *Sheet, styles styleTable, rowXfs
 	}
 }
 
-// parseColElement expands a <col min..max> width declaration per column.
+// parseColElement expands a <col min..max> width, hidden flag, and style per
+// column.
 func parseColElement(e xml.StartElement, sheet *Sheet, colStyles map[int]int) {
 	minCol, maxCol := -1, -1
 	var width float64
 	hasWidth := false
+	hidden := false
 	style, hasStyle := 0, false
 	for _, a := range e.Attr {
 		switch a.Name.Local {
@@ -776,9 +788,11 @@ func parseColElement(e xml.StartElement, sheet *Sheet, colStyles map[int]int) {
 			if n, err := strconv.Atoi(a.Value); err == nil && n > 0 {
 				style, hasStyle = n, true
 			}
+		case "hidden":
+			hidden = onOff(a.Value)
 		}
 	}
-	if minCol < 0 || maxCol < minCol || minCol >= maxSheetCols || (!hasWidth && !hasStyle) {
+	if minCol < 0 || maxCol < minCol || minCol >= maxSheetCols || (!hasWidth && !hasStyle && !hidden) {
 		return
 	}
 	// Guard against a min..max covering the full 16384-column sheet: only the
@@ -789,9 +803,15 @@ func parseColElement(e xml.StartElement, sheet *Sheet, colStyles map[int]int) {
 	if hasWidth && sheet.ColWidths == nil {
 		sheet.ColWidths = map[int]float64{}
 	}
+	if hidden && sheet.HiddenCols == nil {
+		sheet.HiddenCols = map[int]bool{}
+	}
 	for c := minCol; c <= maxCol; c++ {
 		if hasWidth {
 			sheet.ColWidths[c] = width
+		}
+		if hidden {
+			sheet.HiddenCols[c] = true
 		}
 		if hasStyle {
 			colStyles[c] = style

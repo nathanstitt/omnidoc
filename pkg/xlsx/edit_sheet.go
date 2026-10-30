@@ -561,6 +561,55 @@ func (s *SheetEdit) ClearRowHeight(row int) {
 	}
 }
 
+// RowHidden reports whether a 1-based row has hidden="1" (the same fact as
+// Sheet.HiddenRows).
+func (s *SheetEdit) RowHidden(row int) bool {
+	el := s.findRow(row)
+	return el != nil && onOff(el.SelectAttrValue("hidden", ""))
+}
+
+// SetRowHidden hides or shows a 1-based row (1 <= row <= 1048576). Hiding
+// writes hidden="1", adding the row element when the sheet has none for it;
+// showing removes the attribute, and drops a row element left with nothing
+// else to say. The row's height (ht/customHeight) is kept either way, so a
+// shown row comes back at its own height. A call that changes nothing leaves
+// the part untouched.
+func (s *SheetEdit) SetRowHidden(row int, hidden bool) error {
+	if row < 1 || row > maxSheetRows {
+		return fmt.Errorf("xlsx: row %d is outside [1, %d]", row, maxSheetRows)
+	}
+	if s.RowHidden(row) == hidden {
+		return nil
+	}
+	if _, err := s.mut(); err != nil {
+		return err
+	}
+	if hidden {
+		s.ensureRow(row).CreateAttr("hidden", "1")
+		return nil
+	}
+	el := s.findRow(row)
+	el.RemoveAttr("hidden")
+	if isBareRow(el) {
+		xmlpart.Remove(s.sheetData(true), el)
+	}
+	return nil
+}
+
+// isBareRow reports whether a row element carries nothing but its number
+// (and the spans hint): no cells, height, style, or other state.
+func isBareRow(el *etree.Element) bool {
+	if len(el.ChildElements()) > 0 {
+		return false
+	}
+	for _, a := range el.Attr {
+		if a.Key != "r" && a.Key != "spans" {
+			return false
+		}
+	}
+	return true
+}
+
 // ColWidth reports a column's explicit width in character units.
 func (s *SheetEdit) ColWidth(col int) (float64, bool) {
 	root, err := s.doc()
@@ -592,16 +641,21 @@ func (s *SheetEdit) SetColWidth(col int, chars float64) {
 		return
 	}
 	cols := xmlpart.EnsureChildInOrder(root, "cols", worksheetOrder)
-	s.removeColFromRanges(cols, col)
-	el := etree.NewElement("col")
-	el.CreateAttr("min", strconv.Itoa(col))
-	el.CreateAttr("max", strconv.Itoa(col))
+	// Isolate the column rather than replace it, so its hidden flag and style
+	// stay with it.
+	el := isolateCol(cols, col)
+	if el == nil {
+		el = etree.NewElement("col")
+		el.CreateAttr("min", strconv.Itoa(col))
+		el.CreateAttr("max", strconv.Itoa(col))
+		insertColSorted(cols, el)
+	}
 	el.CreateAttr("width", trimFloat(chars))
 	el.CreateAttr("customWidth", "1")
-	cols.AddChild(el)
 }
 
-// ClearColWidth removes a column's explicit width.
+// ClearColWidth removes a column's explicit width. The column keeps its
+// hidden flag and style; a <col> left with nothing else is dropped.
 func (s *SheetEdit) ClearColWidth(col int) {
 	root, err := s.mut()
 	if err != nil {
@@ -611,40 +665,150 @@ func (s *SheetEdit) ClearColWidth(col int) {
 	if cols == nil {
 		return
 	}
-	s.removeColFromRanges(cols, col)
+	if el := isolateCol(cols, col); el != nil {
+		el.RemoveAttr("width")
+		el.RemoveAttr("customWidth")
+		if isDefaultCol(el, "") {
+			xmlpart.Remove(cols, el)
+		}
+	}
 	if len(cols.ChildElements()) == 0 {
 		xmlpart.Remove(root, cols)
 	}
 }
 
-// removeColFromRanges excises col from every <col> range, splitting ranges
-// that straddle it (the remainder keeps the range's attributes).
-func (s *SheetEdit) removeColFromRanges(cols *etree.Element, col int) {
-	for _, c := range xmlpart.Children(cols, "col") {
-		minC, _ := strconv.Atoi(c.SelectAttrValue("min", "0"))
-		maxC, _ := strconv.Atoi(c.SelectAttrValue("max", "0"))
-		if col < minC || col > maxC {
-			continue
+// ColHidden reports whether a 1-based column is in a <col hidden="1"> range
+// (the same fact as Sheet.HiddenCols).
+func (s *SheetEdit) ColHidden(col int) bool {
+	root, err := s.doc()
+	if err != nil {
+		return false
+	}
+	cols := xmlpart.FindChild(root, "cols")
+	if cols == nil {
+		return false
+	}
+	c := findCol(cols, col)
+	return c != nil && onOff(c.SelectAttrValue("hidden", ""))
+}
+
+// SetColHidden hides or shows a 1-based column (1 <= col <= 16384). A <col>
+// range that covers the column is split, as SetColWidth splits it, so its
+// neighbours keep their state and the column keeps its width and style.
+// Hiding a column no range covers adds one at the sheet's default width, so
+// it shows again at that width; showing removes the hidden attribute, and
+// drops a <col> left with nothing but that default width. A call that
+// changes nothing leaves the part untouched.
+func (s *SheetEdit) SetColHidden(col int, hidden bool) error {
+	if col < 1 || col > maxSheetCols {
+		return fmt.Errorf("xlsx: column %d is outside [1, %d]", col, maxSheetCols)
+	}
+	if s.ColHidden(col) == hidden {
+		return nil
+	}
+	defaultWidth := trimFloat(s.DefaultColWidth())
+	root, err := s.mut()
+	if err != nil {
+		return err
+	}
+	cols := xmlpart.EnsureChildInOrder(root, "cols", worksheetOrder)
+	el := isolateCol(cols, col)
+	if !hidden {
+		el.RemoveAttr("hidden")
+		if isDefaultCol(el, defaultWidth) {
+			xmlpart.Remove(cols, el)
 		}
-		switch {
-		case minC == maxC:
-			xmlpart.Remove(cols, c)
-		case col == minC:
-			c.CreateAttr("min", strconv.Itoa(col+1))
-		case col == maxC:
-			c.CreateAttr("max", strconv.Itoa(col-1))
-		default:
-			// Split: shrink this range to the left side, clone for the right.
-			right := c.Copy()
-			right.CreateAttr("min", strconv.Itoa(col+1))
-			right.CreateAttr("max", strconv.Itoa(maxC))
-			c.CreateAttr("max", strconv.Itoa(col-1))
-			xmlpart.InsertBefore(cols, right, c)
-			// Keep document order min-ascending: right belongs after c.
-			xmlpart.Remove(cols, right)
-			cols.AddChild(right)
+		if len(cols.ChildElements()) == 0 {
+			xmlpart.Remove(root, cols)
+		}
+		return nil
+	}
+	if el == nil {
+		el = etree.NewElement("col")
+		el.CreateAttr("min", strconv.Itoa(col))
+		el.CreateAttr("max", strconv.Itoa(col))
+		el.CreateAttr("width", defaultWidth)
+		insertColSorted(cols, el)
+	}
+	el.CreateAttr("hidden", "1")
+	return nil
+}
+
+// colSpan reads a <col> element's 1-based min..max range.
+func colSpan(c *etree.Element) (lo, hi int) {
+	lo, _ = strconv.Atoi(c.SelectAttrValue("min", "0"))
+	hi, _ = strconv.Atoi(c.SelectAttrValue("max", "0"))
+	return lo, hi
+}
+
+// findCol returns the first <col> whose range covers col, or nil.
+func findCol(cols *etree.Element, col int) *etree.Element {
+	for _, c := range xmlpart.Children(cols, "col") {
+		if lo, hi := colSpan(c); col >= lo && col <= hi {
+			return c
 		}
 	}
+	return nil
+}
+
+// isolateCol splits the <col> range covering col so col has a <col> of its
+// own, with the range's attributes, and returns it; nil when no range covers
+// col. The left and right remainders keep the range's attributes and its
+// place in the min-ascending order.
+func isolateCol(cols *etree.Element, col int) *etree.Element {
+	c := findCol(cols, col)
+	if c == nil {
+		return nil
+	}
+	lo, hi := colSpan(c)
+	if lo == hi {
+		return c
+	}
+	var own *etree.Element
+	for _, part := range [][2]int{{lo, col - 1}, {col, col}, {col + 1, hi}} {
+		if part[0] > part[1] {
+			continue
+		}
+		el := c.Copy()
+		el.CreateAttr("min", strconv.Itoa(part[0]))
+		el.CreateAttr("max", strconv.Itoa(part[1]))
+		xmlpart.InsertBefore(cols, el, c)
+		if part[0] == col {
+			own = el
+		}
+	}
+	xmlpart.Remove(cols, c)
+	return own
+}
+
+// insertColSorted adds a <col> before the first range that starts after it,
+// keeping the ranges min-ascending, as Excel writes them.
+func insertColSorted(cols, el *etree.Element) {
+	lo, _ := colSpan(el)
+	for _, c := range xmlpart.Children(cols, "col") {
+		if cLo, _ := colSpan(c); cLo > lo {
+			xmlpart.InsertBefore(cols, el, c)
+			return
+		}
+	}
+	cols.AddChild(el)
+}
+
+// isDefaultCol reports whether a <col> says nothing beyond its range and,
+// when it has one, the given default width (as SetColHidden writes it).
+func isDefaultCol(el *etree.Element, defaultWidth string) bool {
+	for _, a := range el.Attr {
+		switch a.Key {
+		case "min", "max":
+		case "width":
+			if a.Value != defaultWidth {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // sheetData returns the sheetData element, creating it if a degenerate part

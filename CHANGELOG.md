@@ -8,6 +8,31 @@ release receives fixes.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.2] — 2026-10-29
+
+No breaking API changes. The behaviour changes listed under "Fixed" fix bugs.
+
+### Added
+
+- **`pkg/xlsx` hidden rows and columns**, read on both the `Workbook` and the editor:
+  `Sheet.HiddenRows`/`HiddenCols`, with `SheetEdit.RowHidden`/`SetRowHidden` and
+  `ColHidden`/`SetColHidden`. A hidden row keeps its height, and `SetColHidden` splits a
+  covering `<col>` range so the column keeps its width and style. A write that changes nothing
+  leaves the part byte-identical.
+
+### Fixed
+
+- `SetColWidth` replaced the column's `<col>` with a new one, so the column lost its style and
+  any hidden flag. It now splits the covering range and changes only the width. `ClearColWidth`
+  likewise removes only the width.
+- Splitting a `<col>` range put the right-hand part at the end of `<cols>`, and a new `<col>` was
+  always added at the end. Both now go in min-ascending order, as Excel writes them.
+
+### Documentation
+
+- `docs/REQUEST-tinycld-calc-xlsx.md` marks item 10 (hidden rows and columns) as released in
+  v1.1.2.
+
 ## [1.1.1] — 2026-10-29
 
 ### Documentation
@@ -227,6 +252,7 @@ Three of the defects were in dependencies rather than in this code.
 Releases up to 0.1.1 predate this changelog; see the git history and the release
 notes on GitHub for what they contained.
 
+[1.1.2]: https://github.com/nathanstitt/omnidoc/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/nathanstitt/omnidoc/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/nathanstitt/omnidoc/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/nathanstitt/omnidoc/compare/v0.1.1...v1.0.0

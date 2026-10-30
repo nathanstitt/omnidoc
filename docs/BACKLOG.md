@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**30 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
+**31 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -161,6 +161,11 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   pivot cache sources, and conditional-format or validation formulas. Here they keep the old name
   and point at a sheet that no longer exists. `renameSheetRefs` (boundary-aware, skips string
   literals) does the rewrite and can be applied to those.
+- ☐ **X2. Rows hidden by default are not read.** *Low.* `sheetFormatPr zeroHeight="1"` hides
+  every row by default, so a row with no `<row>` element is hidden. `Sheet.HiddenRows` and
+  `SheetEdit.RowHidden` report only rows with `hidden="1"`, so such a sheet reads as showing
+  its unlisted rows. The flag is kept on save. Excel writes it when most rows of a sheet are
+  hidden.
 
 ## Pagination — structural
 
