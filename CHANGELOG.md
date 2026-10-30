@@ -8,7 +8,7 @@ release receives fixes.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.1] — 2026-10-29
 
 ### Documentation
 
@@ -227,7 +227,7 @@ Three of the defects were in dependencies rather than in this code.
 Releases up to 0.1.1 predate this changelog; see the git history and the release
 notes on GitHub for what they contained.
 
-[Unreleased]: https://github.com/nathanstitt/omnidoc/compare/v1.1.0...HEAD
+[1.1.1]: https://github.com/nathanstitt/omnidoc/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/nathanstitt/omnidoc/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/nathanstitt/omnidoc/compare/v0.1.1...v1.0.0
 [0.1.1]: https://github.com/nathanstitt/omnidoc/compare/v0.1.0...v0.1.1
