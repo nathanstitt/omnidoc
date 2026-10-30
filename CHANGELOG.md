@@ -8,6 +8,13 @@ release receives fixes.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-10-29
+
+### Documentation
+
+- `docs/REQUEST-tinycld-calc-xlsx.md` marks items 1–9 as released in v1.1.0 and adds item 10:
+  read and write the `hidden="1"` flag on rows and columns.
+
 ## [1.1.0] — 2026-10-29
 
 No breaking API changes: `gorelease -base=v1.0.0` reports only additions. The behaviour
@@ -220,6 +227,7 @@ Three of the defects were in dependencies rather than in this code.
 Releases up to 0.1.1 predate this changelog; see the git history and the release
 notes on GitHub for what they contained.
 
+[1.1.1]: https://github.com/nathanstitt/omnidoc/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/nathanstitt/omnidoc/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/nathanstitt/omnidoc/compare/v0.1.1...v1.0.0
 [0.1.1]: https://github.com/nathanstitt/omnidoc/compare/v0.1.0...v0.1.1
