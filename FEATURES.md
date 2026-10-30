@@ -1374,6 +1374,17 @@ dependency is `x/image`, so no new transitive surface):
   Cambria via Caladea, Helvetica, Arial, Times, Courier, Verdana, Tahoma, Georgia, Trebuchet,
   Comic Sans, Roboto, Open Sans, and the Liberation/Arimo/Tinos/Cousine equivalents). An unknown
   family silently uses Calibri's width, because this path has no logger.
+- Hidden rows and columns: `Sheet.HiddenRows`/`HiddenCols` (zero-based, `<col>` ranges expanded
+  per column) and `SheetEdit.RowHidden`/`SetRowHidden`, `ColHidden`/`SetColHidden` (1-based).
+  They cover rows a filter hid, rows and columns hidden by hand, and collapsed outline groups, all
+  of which the file marks `hidden="1"`. A hidden row keeps its `ht` in `RowHeights`, and showing
+  it keeps the height. `SetColHidden` splits a covering `<col>` range, so the column keeps its
+  width and style and its neighbours keep theirs. A column no range covers is hidden with a new
+  `<col>` at the sheet's default width. Showing drops a row or `<col>` element left with nothing
+  else to say, and a write that changes nothing leaves the part byte-verbatim. An out-of-range
+  row or column returns an error. `SetColWidth`/`ClearColWidth` split ranges the same way, so a
+  width change keeps the column's hidden flag and style. Every split keeps `<cols>` min-ascending.
+  Rows a sheet hides by default (`sheetFormatPr zeroHeight="1"`) are not read (backlog X2).
 
 **External office corpus — real-world DOCX/XLSX preservation fixtures**
 (`testdata/external/{docx,xlsx}`):

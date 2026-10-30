@@ -14,7 +14,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 - Items 1–9 are done and released in v1.1.0 (merged in
   [PR #176](https://github.com/nathanstitt/omnidoc/pull/176)). calc uses v1.1.0.
-- Item 10 (hidden rows and columns) is open.
+- Item 10 (hidden rows and columns) is done and released in v1.2.0.
 - Each item has a **Built:** note where the API differs from the proposal.
 - The anonymized reference export is committed as `testdata/xlsx/google-export.xlsx` (repository
   license). `pkg/xlsx/reference_test.go` pins items 1, 2, 4, and 5 against it, and also checks
@@ -171,7 +171,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 10. Hidden rows and columns
 
-- ☐ **Read and write the hidden flag on rows and columns.** A row is hidden by
+- ☑ v1.2.0 **Read and write the hidden flag on rows and columns.** A row is hidden by
   `<row r="5" hidden="1">`, and a column by `<col min="3" max="3" hidden="1">`. Google and Excel
   write `hidden="1"` for rows that a filter hides and for rows or columns that the user hid. Today
   `parseRowElement` reads only `ht`, `s`, and `customFormat`, and `parseColElement` reads only
@@ -190,6 +190,12 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
   - Reference file: the export has no hidden rows. A test file needs a filtered row
     (`hidden="1"` inside the autoFilter range), a hand-hidden row outside it, and a hidden column
     range `min..max` that is wider than one column.
+  - **Built:** as proposed, except that `SetRowHidden` and `SetColHidden` return an error for a
+    row or column out of range (1..1048576, 1..16384). Showing a row or column drops an element
+    left with nothing else to say. Hiding a column no range covers writes a `<col>` at the
+    sheet's default width. `SetColWidth`/`ClearColWidth` now split ranges the same way, so a
+    width change keeps the hidden flag. `pkg/xlsx/hidden_test.go` uses the test file described
+    above. Rows hidden by default (`sheetFormatPr zeroHeight="1"`) are not read (backlog X2).
 
 ---
 

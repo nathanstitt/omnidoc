@@ -115,6 +115,17 @@ type Sheet struct {
 	// ColWidths maps a zero-based column index to its explicit width in Excel
 	// character units (<col> ranges expanded per column).
 	ColWidths map[int]float64
+	// HiddenRows holds the zero-based index of each row with hidden="1": rows
+	// a filter hid and rows hidden by hand or by a collapsed outline group. A
+	// hidden row keeps its RowHeights entry, the height it shows at once
+	// unhidden. The editor reads and writes the same fact as
+	// SheetEdit.RowHidden/SetRowHidden.
+	HiddenRows map[int]bool
+	// HiddenCols holds the zero-based index of each column a <col
+	// hidden="1"> range covers (ranges expanded per column, like ColWidths).
+	// The editor reads and writes the same fact as
+	// SheetEdit.ColHidden/SetColHidden.
+	HiddenCols map[int]bool
 	// DefaultRowHeight is the sheetFormatPr defaultRowHeight in points, or
 	// zero when the sheet declares none.
 	DefaultRowHeight float64
