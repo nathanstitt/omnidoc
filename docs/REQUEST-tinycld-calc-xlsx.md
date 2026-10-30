@@ -12,9 +12,9 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## Status (2026-10-29)
 
-- Items 1–9 are all implemented and in review in
-  [PR #176](https://github.com/nathanstitt/omnidoc/pull/176) (branch `xlsx-calc-requests`). They
-  are not merged or released. Each item stays ◐ until a release contains it.
+- Items 1–9 are done and released in v1.1.0 (merged in
+  [PR #176](https://github.com/nathanstitt/omnidoc/pull/176)). calc uses v1.1.0.
+- Item 10 (hidden rows and columns) is open.
 - Each item has a **Built:** note where the API differs from the proposal.
 - The anonymized reference export is committed as `testdata/xlsx/google-export.xlsx` (repository
   license). `pkg/xlsx/reference_test.go` pins items 1, 2, 4, and 5 against it, and also checks
@@ -50,7 +50,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 1. Sheet view: gridlines
 
-- ◐ **Read and write `<sheetView showGridLines="0">`.**
+- ☑ v1.1.0 **Read and write `<sheetView showGridLines="0">`.**
   - Read: add `Sheet.ShowGridLines bool` (default `true` when the attribute is absent).
   - Write: add `SheetEdit.SetShowGridLines(bool)`. Keep all other `sheetView` attributes and
     children (`pane`, `selection`).
@@ -61,7 +61,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 2. AutoFilter
 
-- ◐ **Read and write the sheet `<autoFilter>`.**
+- ☑ v1.1.0 **Read and write the sheet `<autoFilter>`.**
   - Read: add `Sheet.AutoFilter *AutoFilter` with `Ref string` (for example `A1:BY35`) and the
     `<filterColumn>` children: `ColID int`, the `<filters>` value list, `blank="1"`, and
     `<customFilters>` (operator and value). Keep unknown children as raw XML for passthrough.
@@ -77,7 +77,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 3. Hyperlinks
 
-- ◐ **Read and write cell hyperlinks (`<hyperlinks>` + the sheet rels).**
+- ☑ v1.1.0 **Read and write cell hyperlinks (`<hyperlinks>` + the sheet rels).**
   - Read: add `Sheet.Hyperlinks []Hyperlink` with `Ref string`, `URL string` (resolved from the
     external relationship `r:id`), `Location string` (internal target, for example `Sheet2!A1`),
     `Display string`, and `Tooltip string`.
@@ -88,14 +88,14 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 4. Pivot tables
 
-- ◐ **Expose the "Values" placeholder on an axis.** In `<colFields><field x="-2"/></colFields>`
+- ☑ v1.1.0 **Expose the "Values" placeholder on an axis.** In `<colFields><field x="-2"/></colFields>`
   (and in `rowFields`), `x="-2"` is not a cache field. It marks where the data-field captions go.
   Today `fieldName(-2)` returns `""` and calc gets an axis field with an empty name. Do not add
   it to `Rows`/`Cols`; add `PivotTable.ValuesAxis string` (`"col"` or `"row"`) and
   `ValuesPosition int`.
   - **Built:** as proposed. `ValuesPosition` is the number of axis fields before the
     placeholder. `AddPivotTable` writes it back.
-- ◐ **Data field number format.** Read `<dataField numFmtId="…">` and, when it is absent, the
+- ☑ v1.1.0 **Data field number format.** Read `<dataField numFmtId="…">` and, when it is absent, the
   `numFmtId` on the matching `<pivotField>`. Add `PivotValueField.NumFmt string` (the format code,
   resolved through the styles part the same way as `Style.NumFmt`). Reference file: every pivot
   field has `numFmtId="164"` (`"$"#,##0.00`).
@@ -104,16 +104,16 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
     shows `0` where Excel and Google show `$0.00`.
   - **Built:** as proposed. `AddPivotTable` writes it as the dataField `numFmtId`. "SUM of
     Employee" reads `"$"#,##0.00` from its pivotField (pinned against the reference file).
-- ◐ **Axis item sort order.** Read `<pivotField sortType="ascending|descending">` for axis fields.
+- ☑ v1.1.0 **Axis item sort order.** Read `<pivotField sortType="ascending|descending">` for axis fields.
   Add a `Sort string` to an axis-field type (today axis fields are plain `[]string`, so this
   needs a small struct, for example `PivotAxisField{Name, Sort string}`).
   - **Built:** `PivotTable.AxisSort map[string]string` (field name → `"ascending"` /
     `"descending"`). This keeps `Rows`/`Cols`/`Filters` as `[]string`, so the v1 API does not
     break.
-- ◐ **Location metadata.** Read `<location firstHeaderRow firstDataRow firstDataCol>`. calc uses
+- ☑ v1.1.0 **Location metadata.** Read `<location firstHeaderRow firstDataRow firstDataCol>`. calc uses
   these to place the header band.
   - **Built:** `PivotTable.LocationInfo *PivotLocation` (also `rowPageCount`/`colPageCount`).
-- ◐ **Show-empty / row header caption.** Read `rowHeaderCaption`, `colHeaderCaption`, and
+- ☑ v1.1.0 **Show-empty / row header caption.** Read `rowHeaderCaption`, `colHeaderCaption`, and
   `dataCaption` from `<pivotTableDefinition>`.
   - **Built:** `DataCaption`, `RowHeaderCaption`, `ColHeaderCaption`, plus `GrandTotalCaption`,
     `MissingCaption`/`HideMissing` (the "for empty cells show" setting), and
@@ -121,7 +121,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 5. Workbook default font
 
-- ◐ **Expose the workbook default font.** Add `Workbook.DefaultFont Font` (the font of the
+- ☑ v1.1.0 **Expose the workbook default font.** Add `Workbook.DefaultFont Font` (the font of the
   `Normal` cell style, `<cellStyleXfs>` xf 0, normally `<fonts>` index 0).
   - When a cell font has no `<sz>` (reference file: fonts 5 has `name="Arial"` and no size), the
     resolved `Font.Size` is 0. Excel and Google show it at the default size (10pt in the
@@ -133,7 +133,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 6. Sheet default column width
 
-- ◐ **Document the unit of `DefaultColWidth`.** It is the raw `defaultColWidth` attribute (character
+- ☑ v1.1.0 **Document the unit of `DefaultColWidth`.** It is the raw `defaultColWidth` attribute (character
   units). Confirm that a sheet with only `baseColWidth` returns the derived width
   (`baseColWidth + 5px padding` rule), not 0.
   - **Built:** the unit is characters (widths of the default font's widest digit). A sheet with
@@ -142,7 +142,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 7. Sheet reorder and sheet-scoped names
 
-- ◐ **`MoveSheet` must remap sheet indexes.** After a move, a defined name's `localSheetId` and
+- ☑ v1.1.0 **`MoveSheet` must remap sheet indexes.** After a move, a defined name's `localSheetId` and
   `<workbookView activeTab>` still hold the old index, so a sheet-scoped name can point at the
   wrong sheet. calc now reorders sheets on save (it inserts a sheet for an imported pivot).
   - **Built:** `MoveSheet` remaps `localSheetId`, `activeTab`, and `firstSheet`. `DeleteSheet`
@@ -151,7 +151,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 8. Sheet default sizes on write
 
-- ◐ **Add `SheetEdit.SetDefaultRowHeight(pt)` / `SetDefaultColWidth(chars)`** (writes
+- ☑ v1.1.0 **Add `SheetEdit.SetDefaultRowHeight(pt)` / `SetDefaultColWidth(chars)`** (writes
   `<sheetFormatPr>`). calc reads the defaults on import; it cannot save a change to them yet.
   - **Built:** as proposed, plus the readers `SheetEdit.DefaultRowHeight()`/`DefaultColWidth()`.
     A height is (0, 409] pt and is written with `customHeight="1"`. A width is (0, 255]
@@ -160,7 +160,7 @@ Status legend: ☐ open · ◐ in progress · ☑ done (released in version …)
 
 ## 9. 1904 date system
 
-- ◐ **Expose the date system per formula cache.** A `KindDate` cached value in a 1904 workbook is
+- ☑ v1.1.0 **Expose the date system per formula cache.** A `KindDate` cached value in a 1904 workbook is
   a 1904-system serial. calc's formula engine uses the 1900 system. Either give the serial in the
   1900 system, or keep `Workbook.Date1904` (already present) documented as the switch callers
   must apply to `Value.F`.
