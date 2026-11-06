@@ -43,10 +43,10 @@ func TestArabicJoiningFormsFollowReadingOrder(t *testing.T) {
 }
 
 // Every shaped glyph must be drawn where harfbuzz placed it. shapeComplex returns
-// logical order with GPOS x offsets folded into advances; drawn in visual order (the
-// reverse), each glyph's pen position must equal harfbuzz's pen plus x offset. A
-// word-final letter's mark is harfbuzz's FIRST visual glyph (كتب's beh dot, بيت's
-// teh dots), the case with no glyph before it to absorb the offset.
+// logical order with harfbuzz's advances and each glyph's GPOS x offset; drawn in
+// visual order (the reverse), each glyph's pen plus its offset must equal harfbuzz's.
+// A word-final letter's mark is harfbuzz's FIRST visual glyph (كتب's beh dot, بيت's
+// teh dots).
 func TestShapedGlyphsLandWhereHarfbuzzPlacedThem(t *testing.T) {
 	face, ok := pkgfont.LoadScriptFallback('م', pkgfont.Style{})
 	if !ok {
@@ -76,7 +76,7 @@ func TestShapedGlyphsLandWhereHarfbuzzPlacedThem(t *testing.T) {
 		got := map[uint16][]float64{}
 		pen = 0
 		for i := len(shaped) - 1; i >= 0; i-- { // visual order
-			got[shaped[i].gid] = append(got[shaped[i].gid], pen)
+			got[shaped[i].gid] = append(got[shaped[i].gid], pen+shaped[i].xOffset)
 			pen += shaped[i].advance
 		}
 		for gid, xs := range want {

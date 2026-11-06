@@ -122,11 +122,10 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   U+0460 on, the historic letters and the letters of non-Russian languages). A missing letter goes
   on to the fallback directory and the installed fonts; in bundled mode with no directory it is
   drawn as `.notdef` with a log. Needs a wider OFL face.
-- ☐ **G11. GPOS vertical mark offsets outside CSS lines.** *Small.* `shapeComplex` keeps a mark's
-  y offset as the glyph's `BaselineShiftPt` (`complex.go`, `shape.go`), which only the CSS line
-  emitter applies (`fragment.go`). Margin-box text (`marginbox.go`) and SVG text
-  (`svg/draw/text.go`) drop it, so an Arabic mark harfbuzz raises or lowers sits at its default
-  height there. The x offset is folded into advances and applies everywhere.
+- ☐ **G11. GPOS mark placement in CSS vertical writing modes.** *Small.* The CSS vertical line
+  emitter (`inline.go`, the `penY` path) does not add a glyph's `XShiftPt`/`BaselineShiftPt`, so a
+  sideways Arabic glyph in `writing-mode: vertical-*` loses its harfbuzz mark placement (the dot sits
+  at its base's pen). Horizontal CSS lines, margin boxes and SVG text apply it.
 
 ## HTML/CSS — grid
 

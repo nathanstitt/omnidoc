@@ -678,11 +678,12 @@ bullet's design rationale is in its PR:
   exposes the SFNT, which satisfies `harfbuzz.FaceOpentype` directly. Shaping runs RIGHT-TO-LEFT,
   so each letter takes its joining form from its neighbours in reading order, and harfbuzz's
   visual output is reversed back to logical order so the pipeline stays logical up to the single
-  L2 reorder, which restores harfbuzz's order. GPOS mark placement is kept: a mark's x offset is
-  folded into the advances (the glyph before it gains it, the mark loses it), so every path that
-  places glyphs by advance (CSS layout, margin boxes, SVG text) draws an Arabic dot under its
-  letter, in the raster and the PDF alike. The y offset rides the per-glyph baseline shift, which
-  only the CSS line emitter applies; margin boxes and SVG text drop it. Glyphs carry their cluster's runes exactly once, so `/ToUnicode` neither duplicates
+  L2 reorder, which restores harfbuzz's order. GPOS mark placement is kept as a per-glyph paint
+  shift (`XShiftPt`, and `BaselineShiftPt` for y) that moves a mark's ink without moving the pen or
+  reordering glyphs, so each cluster keeps its runes where the bidi reorder expects them. CSS lines,
+  margin boxes and SVG text (including sideways glyphs in a vertical run) all apply it, so an Arabic
+  dot sits on its letter in the raster and the PDF alike, also at the end of a word and after Latin
+  text. Glyphs carry their cluster's runes exactly once, so `/ToUnicode` neither duplicates
   nor drops text. Showcase §15 "Real script".
 - **Bundled RTL faces + per-character font fallback** (`pkg/internal/font/standard`, `pkg/internal/layout/font/cache.go`,
   `pkg/internal/layout/inline/shape.go`): Noto Sans Hebrew and Noto Naskh Arabic (both OFL 1.1, no Reserved

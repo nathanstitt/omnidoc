@@ -54,9 +54,10 @@ type shapedGlyph struct {
 	gid     uint16
 	advance float64 // em units (advance / upem)
 	runes   []rune  // the source runes of this glyph's cluster; may be several or none
-	// yOffset is harfbuzz's GPOS vertical placement in em units, positive up. The
-	// horizontal placement is folded into the advances instead (see foldXOffsets).
-	yOffset float64
+	// xOffset and yOffset are harfbuzz's GPOS placement in em units (y positive up):
+	// where the glyph is drawn relative to its pen, without moving the pen. Mark
+	// attachment uses them to put an Arabic dot under or over its letter.
+	xOffset, yOffset float64
 }
 
 // shapeComplex shapes text through harfbuzz using face's OpenType layout tables, in
@@ -93,83 +94,21 @@ func shapeComplex(face *pkgfont.Face, text []rune) ([]shapedGlyph, bool) {
 		return nil, false
 	}
 	out := make([]shapedGlyph, 0, len(buf.Info))
-	xOffsets := make([]float64, len(buf.Info))
 	for i, info := range buf.Info {
 		out = append(out, shapedGlyph{
 			gid:     uint16(info.Glyph),
 			advance: float64(buf.Pos[i].XAdvance) / upem,
 			runes:   clusterRunes(buf.Info, text, i),
+			xOffset: float64(buf.Pos[i].XOffset) / upem,
 			yOffset: float64(buf.Pos[i].YOffset) / upem,
 		})
-		xOffsets[i] = float64(buf.Pos[i].XOffset) / upem
 	}
-	foldXOffsets(out, xOffsets)
 	// Harfbuzz's right-to-left output is in visual order; hand the pipeline logical
 	// order (see the DIRECTION note).
 	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, true
-}
-
-// foldXOffsets applies harfbuzz's GPOS horizontal placements (mark attachment: an
-// Arabic dot moved under its letter) by redistributing advances, so every backend
-// that places glyphs by advance alone — the raster, the PDF writer, SVG — draws each
-// glyph where harfbuzz put it. out and xOffsets are in harfbuzz's visual output order,
-// which is the order the glyphs are finally drawn in (see the DIRECTION note).
-//
-// A glyph at pen p with x offset o is drawn at p+o. Giving the glyph before it an
-// advance larger by o, and the glyph itself an advance smaller by o, draws it at p+o
-// and leaves the pen after it unchanged.
-//
-// The segment's first visual glyph has no glyph before it, and in right-to-left output
-// it is often a mark: a word-final letter's dots come first, ahead of their base (كتب,
-// بيت). For that leading run of zero-advance marks the base is moved in front of them:
-// the base keeps pen p, each mark is drawn at p plus its offset, and the last mark's
-// advance carries the pen on to p plus the base's advance, where it was before.
-func foldXOffsets(out []shapedGlyph, xOffsets []float64) {
-	start := 1
-	if k := leadingMarks(out, xOffsets); k > 0 {
-		base, width := out[k], out[k].advance
-		marks := append([]shapedGlyph(nil), out[:k]...)
-		offs := append([]float64(nil), xOffsets[:k]...)
-		out[0] = base
-		out[0].advance = offs[0]
-		for j := range marks {
-			out[j+1] = marks[j]
-			next := width
-			if j+1 < k {
-				next = offs[j+1]
-			}
-			out[j+1].advance = next - offs[j]
-		}
-		start = k + 1
-	}
-	for i := start; i < len(out); i++ {
-		if o := xOffsets[i]; o != 0 {
-			out[i-1].advance += o
-			out[i].advance -= o
-		}
-	}
-}
-
-// leadingMarks returns the length of the run of zero-advance glyphs that starts the
-// visual output when at least one of them carries an x offset and a glyph with an
-// advance (their base) follows; 0 otherwise.
-func leadingMarks(out []shapedGlyph, xOffsets []float64) int {
-	offset := false
-	for k := range out {
-		if out[k].advance != 0 {
-			if offset {
-				return k
-			}
-			return 0
-		}
-		if xOffsets[k] != 0 {
-			offset = true
-		}
-	}
-	return 0
 }
 
 // clusterRunes returns the source runes glyph i stands for.

@@ -300,6 +300,11 @@ type Glyph struct {
 	// from the line baseline. The shaper does not act on it. Zero for callers that don't
 	// set Run.BaselineShiftPt (e.g. DOCX).
 	BaselineShiftPt float64
+	// XShiftPt moves the glyph's paint position right (positive) of its pen, in points,
+	// without moving the pen: a GPOS mark placement (an Arabic dot attached to its
+	// letter). Every horizontal emitter adds it to the glyph's paint X. Zero for every
+	// glyph not shaped by harfbuzz.
+	XShiftPt float64
 	// Face, GID, and Runes carry font identity for text-emitting backends (the PDF
 	// writer embeds Face's program for GID and maps GID -> Runes in /ToUnicode). Face
 	// is nil for whitespace/atomic/break glyphs; a rasterizing backend ignores all
@@ -509,9 +514,11 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 						// would be a different wrong answer.
 						g.Advance = spacedAdvance(sg.advance*r.SizePt, false)
 						g.Runes = sg.runes
-						// A mark's GPOS vertical placement (positive = up) rides the same
-						// per-glyph shift as vertical-align. Only the CSS line emitter applies
-						// that shift; margin boxes and SVG text drop it (BACKLOG G11).
+						// A mark's GPOS placement moves its ink, not the pen: the x offset
+						// is a per-glyph paint shift and the y offset rides the same shift
+						// as vertical-align. Glyph order and advances stay harfbuzz's, so
+						// each cluster keeps its runes where the bidi reorder expects them.
+						g.XShiftPt = sg.xOffset * r.SizePt
 						g.BaselineShiftPt += sg.yOffset * r.SizePt
 						out = append(out, g)
 						lineCol += g.Advance
