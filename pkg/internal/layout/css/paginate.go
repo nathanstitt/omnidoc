@@ -530,9 +530,18 @@ func bucketBlocksGrowing(blocks []*Fragment, pageH, cbWidth float64, logf func(s
 		// because the author's break can sit well ABOVE the boundary — the page is not
 		// full, it is simply ending here. An edge break needs no split; effectiveBreaks
 		// has already propagated it to b itself.
-		if !forcedBefore && lineSplittable(b) {
+		if lineSplittable(b) {
 			if res, ok := splitAtForcedBreak(b); ok {
 				noteSplit(res.head, res.tail)
+				// b's own forced break (if any) closes the page before it first; the
+				// nested break then ends the page b's head starts.
+				if forcedBefore && len(cur.blocks) > 0 {
+					buckets = append(buckets, cur)
+					cur = pageBucket{}
+				}
+				if len(cur.blocks) == 0 {
+					cur.top = b.Y
+				}
 				cur.blocks = append(cur.blocks, res.head)
 				buckets = append(buckets, cur)
 				cur = pageBucket{top: res.tail.Y}
