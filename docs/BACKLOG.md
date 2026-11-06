@@ -126,6 +126,15 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   emitter (`inline.go`, the `penY` path) does not add a glyph's `XShiftPt`/`BaselineShiftPt`, so a
   sideways Arabic glyph in `writing-mode: vertical-*` loses its harfbuzz mark placement (the dot sits
   at its base's pen). Horizontal CSS lines, margin boxes and SVG text apply it.
+- ☐ **G12. Hebrew marks on the per-rune path lack GPOS placement.** *Small–medium.* Pointed Hebrew
+  takes the per-rune path, which does not apply GPOS mark-to-base anchors, so the shin dot U+05C1
+  in "שָׁלוֹם" prints at the sin-dot position. Needs the GPOS mark anchors on that path, or shaping
+  for Hebrew runs. Found by Books invoice PDFs (v1.2.0).
+- ☐ **G13. Arabic text reads back with an extra U+FFFD and in visual order.** *Small–medium.* The
+  bundled-font Arabic word "مرحبا" draws correctly joined, but pdftotext reads back "مرح�با"
+  (one shaped glyph has no usable ToUnicode entry) and `WriteText` reads back "ب�ا مرح" (the
+  two joined pieces in visual order). Copy, search and text extraction of Arabic in a written PDF
+  are therefore wrong. Found by Books invoice PDFs (v1.2.0, 2026-11-06).
 
 ## HTML/CSS — flex
 
