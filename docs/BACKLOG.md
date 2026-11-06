@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**39 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
+**38 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -84,10 +84,6 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   `table-footer-group` is laid out once, at the end of the table. Needs a `FooterTop` on the table
   fragment like `HeaderBottom` (`fragment.go`) and a reservation for the footer rows in
   `splitTableForPage` (`tablepage.go`).
-- ☐ **F10. Collapsed borders are dropped from a split table.** *Medium.* `splitTableForPage` and
-  `splitTableRowThroughCells` set `Collapsed` to nil on both the head and the tail (`tablepage.go`),
-  so a `border-collapse: collapse` table that spans pages loses every cell border on every page it
-  spans. Needs the collapsed strips clipped per fragment (and shifted with the repeated header).
 
 ## HTML/CSS — web fonts
 

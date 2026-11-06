@@ -175,3 +175,64 @@ func TestFloatAfterSplitTableStartsBelowIt(t *testing.T) {
 	}
 	t.Fatal("the float was not laid out on any page")
 }
+
+// A border-collapse table keeps its grid lines on every page it spans: each page
+// draws a rule under every row it holds (and under the repeated header), and the
+// column rules run the height of that page's rows.
+func TestCollapsedBordersSurviveTableSplit(t *testing.T) {
+	src := `<!DOCTYPE html><html><head><style>
+  body { margin: 0; font-family: serif; font-size: 16px; }
+  table { width: 300px; border-collapse: collapse; } td, th { padding: 0; border: 1px solid black; }
+</style></head><body><p>BEFORE</p>` + longRowsTable(40, "") + `<p>AFTER</p></body></html>`
+	pages := layoutPagedHTML(t, src, 300)
+	if len(pages.Pages) < 3 {
+		t.Fatalf("want at least 3 pages, got %d", len(pages.Pages))
+	}
+	for pi, p := range pages.Pages {
+		rows, horizontal, vertical := 0, 0, 0
+		for _, it := range p.Items {
+			switch it.Kind {
+			case layout.GlyphKind:
+				if string(it.Glyph.Runes) == "r" {
+					rows++ // the first letter of each "row" cell
+				}
+			case layout.BorderKind:
+				if it.Border.WPt > it.Border.HPt {
+					horizontal++
+				} else {
+					vertical++
+				}
+			}
+		}
+		if rows == 0 {
+			continue
+		}
+		if horizontal < rows {
+			t.Errorf("page %d: %d horizontal grid rules for %d rows", pi, horizontal, rows)
+		}
+		if vertical < rows {
+			t.Errorf("page %d: %d vertical grid rules for %d rows", pi, vertical, rows)
+		}
+	}
+}
+
+// splitCollapsedBorders: a row rule on the split line goes to both sides, and a column
+// rule crossing it (a row split through its cells) is clipped to each side.
+func TestSplitCollapsedBordersClipsAtTheSplit(t *testing.T) {
+	strips := []layout.BorderItem{
+		{XPt: 0, YPt: 9.5, WPt: 100, HPt: 1, Side: layout.EdgeTop},   // rule at y=10
+		{XPt: 0, YPt: 49.5, WPt: 100, HPt: 1, Side: layout.EdgeTop},  // rule at y=50 (the split)
+		{XPt: 0, YPt: 89.5, WPt: 100, HPt: 1, Side: layout.EdgeTop},  // rule at y=90
+		{XPt: -0.5, YPt: 30, WPt: 1, HPt: 40, Side: layout.EdgeLeft}, // column rule 30..70
+	}
+	head, tail := splitCollapsedBorders(strips, 50)
+	if len(head) != 3 || len(tail) != 3 {
+		t.Fatalf("head %d strips, tail %d strips; want 3 and 3", len(head), len(tail))
+	}
+	if v := head[2]; v.YPt != 30 || v.HPt != 20 {
+		t.Errorf("head column rule = %v..%v, want 30..50", v.YPt, v.YPt+v.HPt)
+	}
+	if v := tail[2]; v.YPt != 50 || v.HPt != 20 {
+		t.Errorf("tail column rule = %v..%v, want 50..70", v.YPt, v.YPt+v.HPt)
+	}
+}

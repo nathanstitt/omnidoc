@@ -1,6 +1,7 @@
 package css
 
 import (
+	"math"
 	"sort"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
@@ -59,9 +60,7 @@ func splitTableForPage(tbl *Fragment, pageBottom float64) splitResult {
 	tail.H = (tbl.Y + tbl.H) - splitY
 	head.Border[layout.EdgeBottom] = BorderEdge{}
 	tail.Border[layout.EdgeTop] = BorderEdge{}
-	// Collapsed border strips, if any, are dropped on the split (a documented limitation —
-	// the collapsed grid is computed table-wide and is not re-derived per page fragment).
-	head.Collapsed, tail.Collapsed = nil, nil
+	head.Collapsed, tail.Collapsed = splitCollapsedBorders(tbl.Collapsed, splitY)
 	added := repeatHeaderOnTail(tbl, &tail, splitY)
 	return splitResult{head: &head, tail: &tail, grow: growthAt(tbl, added)}
 }
@@ -116,9 +115,7 @@ func splitTableRowThroughCells(tbl *Fragment, row tableRow, pageBottom float64, 
 	tail.H = (tbl.Y + tbl.H) - tail.Y
 	head.Border[layout.EdgeBottom] = BorderEdge{}
 	tail.Border[layout.EdgeTop] = BorderEdge{}
-	// Collapsed border strips are table-wide and not re-derived per fragment (the same
-	// documented limitation as the between-rows path).
-	head.Collapsed, tail.Collapsed = nil, nil
+	head.Collapsed, tail.Collapsed = splitCollapsedBorders(tbl.Collapsed, pageBottom)
 	distributeOutOfFlow(tbl, &head, &tail, pageBottom)
 	added := repeatHeaderOnTail(tbl, &tail, pageBottom)
 	return splitResult{head: &head, tail: &tail, grow: growthAt(tbl, added)}, true
@@ -169,6 +166,27 @@ func repeatHeaderOnTail(tbl, tail *Fragment, splitY float64) (added float64) {
 		translateFragment(c, 0, headerH)
 	}
 	tail.Children = append(repeated, tail.Children...)
+	// The collapsed grid lines move with the body cells, and the header's own lines are
+	// copied with the header — except its bottom rule, which the tail's first row
+	// already draws at the same place as its top rule.
+	for i := range tail.Collapsed {
+		tail.Collapsed[i].YPt += headerH
+	}
+	for _, b := range tbl.Collapsed {
+		top, bottom := b.YPt, b.YPt+b.HPt
+		if isHorizontalStrip(b) {
+			mid := b.YPt + b.HPt/2
+			top, bottom = mid, mid
+			if mid > tbl.HeaderBottom-0.5 {
+				continue // the header's bottom rule (or a later line)
+			}
+		}
+		if top < headerTop-0.5 || bottom > tbl.HeaderBottom+0.5 {
+			continue
+		}
+		b.YPt += tail.Y - headerTop
+		tail.Collapsed = append(tail.Collapsed, b)
+	}
 	tail.H += headerH
 	// The tail now carries its own copy of the header at its top. Re-anchor
 	// HeaderBottom to THAT copy, so if the tail is split again — a table spanning three
@@ -177,6 +195,44 @@ func repeatHeaderOnTail(tbl, tail *Fragment, splitY float64) (added float64) {
 	// and the repeat would silently stop after the second page.
 	tail.HeaderBottom = tail.Y + headerH
 	return headerH
+}
+
+// splitCollapsedBorders divides a collapsed table's grid strips at the page-space Y
+// splitY. A horizontal rule goes to the side its centre line is on, and to BOTH when it
+// sits on splitY (the bottom rule of the head's last row is also the top rule of the
+// tail's first row). A vertical rule is clipped to each side's extent, so a column rule
+// through a row split mid-cell continues on the next page.
+func splitCollapsedBorders(strips []layout.BorderItem, splitY float64) (head, tail []layout.BorderItem) {
+	for _, b := range strips {
+		if isHorizontalStrip(b) {
+			mid := b.YPt + b.HPt/2
+			if mid <= splitY+0.5 {
+				head = append(head, b)
+			}
+			if mid >= splitY-0.5 {
+				tail = append(tail, b)
+			}
+			continue
+		}
+		if b.YPt < splitY {
+			h := b
+			h.HPt = math.Min(b.YPt+b.HPt, splitY) - b.YPt
+			head = append(head, h)
+		}
+		if b.YPt+b.HPt > splitY {
+			t := b
+			t.YPt = math.Max(b.YPt, splitY)
+			t.HPt = b.YPt + b.HPt - t.YPt
+			tail = append(tail, t)
+		}
+	}
+	return head, tail
+}
+
+// isHorizontalStrip reports whether a collapsed grid strip is a row rule (top or
+// bottom side) rather than a column rule.
+func isHorizontalStrip(b layout.BorderItem) bool {
+	return b.Side == layout.EdgeTop || b.Side == layout.EdgeBottom
 }
 
 // isCaptionFragment reports whether f is a table caption's fragment.

@@ -223,7 +223,10 @@ bullet's design rationale is in its PR:
   or more pages keeps repeating. A top `<caption>` stays with the table's first part and is not
   repeated. Each repeat makes the tail taller, and that growth is carried to everything after the
   table (later siblings at any depth, later blocks, root floats, and the html/body wrapper), so the
-  content that follows starts below the table's last row.
+  content that follows starts below the table's last row. A `border-collapse: collapse` table
+  keeps its grid lines on every page: the strips are divided at the split (a row rule on the
+  split line closes the head and opens the tail; a column rule through a row split mid-cell is
+  clipped to each side), and the header's rules repeat with the header.
 - **Mid-cell table splitting** (`pkg/internal/layout/css/tablepage.go`): a table row taller than the page —
   including a single-row table — splits THROUGH its cells rather than overflowing and being clipped.
   A cell's content is an ordinary fragment spine, so the recursive splitter handles it with no
