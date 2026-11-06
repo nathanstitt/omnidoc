@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**33 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
+**40 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -80,6 +80,21 @@ trusting any entry that has aged** — grep for the claimed symptom first.
 - ☐ **F8. A rowspan cell whose *spanned-into* row grows from baseline does not re-grow.** *Deferred
   (localized).* Needs the cross-row baseline re-solve the table design deliberately avoids. Documented in
   `table.go`. Low value, high complexity. (Same issue as I6.)
+- ☐ **F9. Repeat `<tfoot>` on every page a table spans.** *Medium.* Only `<thead>` repeats: a
+  `table-footer-group` is laid out once, at the end of the table. Needs a `FooterTop` on the table
+  fragment like `HeaderBottom` (`fragment.go`) and a reservation for the footer rows in
+  `splitTableForPage` (`tablepage.go`).
+- ☐ **F10. Collapsed borders are dropped from a split table.** *Medium.* `splitTableForPage` and
+  `splitTableRowThroughCells` set `Collapsed` to nil on both the head and the tail (`tablepage.go`),
+  so a `border-collapse: collapse` table that spans pages loses every cell border on every page it
+  spans. Needs the collapsed strips clipped per fragment (and shifted with the repeated header).
+- ☐ **F11. Content after a split table overlaps the table's last rows.** *Medium.* Each repeated
+  `<thead>` (or a caption repeated by the wrapper split) grows the tail by its height
+  (`repeatHeaderOnTail`, `tablepage.go`), but the blocks after the table keep their Y, so on the
+  table's last page the next block is drawn over the last rows — one header height per repeat (a
+  2026-11-06 probe: 48 rows over three pages, the following paragraph covered the last two rows).
+  A table in a `<caption>` wrapper also repeats the caption, not the `<thead>`, on continuation
+  pages. Needs the growth carried to the following siblings and the enclosing ancestors.
 
 ## HTML/CSS — web fonts
 
@@ -108,6 +123,16 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   `dirFallbackFaces` reads and parses every file in the directory while holding `FaceCache.mu`, so other
   `Resolve`/`ResolveFallback` calls on that cache block while large CJK files load. Candidates: parse
   each file lazily, only when the earlier files lack the glyph, or load outside the lock.
+- ☐ **G9. Fallback directory is parsed once per document.** *Small (perf).* Each document's
+  `FaceCache` parses the `WithFallbackFontDir` fonts again on its first glyph miss
+  (`dirFallbackFaces`, `cache.go`). A server that renders many documents with CJK text would gain
+  from a process-wide cache of parsed faces, keyed by path and modification time.
+- ☐ **G10. Bundled Greek/Cyrillic covers WGL4 only.** *Small.* `standard.Fallback` sends all of
+  U+0370-03FF and U+0400-04FF to the bundled Go fonts, but those fonts cover the WGL4 repertoire,
+  not the full blocks: a 2026-11-06 probe found 158 of the 256 Cyrillic code points missing (from
+  U+0460 on, the historic letters and the letters of non-Russian languages). A missing letter goes
+  on to the fallback directory and the installed fonts; in bundled mode with no directory it is
+  drawn as `.notdef` with a log. Needs a wider OFL face.
 
 ## HTML/CSS — grid
 
@@ -149,6 +174,16 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   AFM tables for exact base-14 advances when a PDF omits `/Widths`, and synthetic emboldening for a
   family missing a real variant. *Medium.* See `docs/PDF.md`.
 
+## PDF — writer
+
+- ☐ **W1. Arabic dot marks are missing from PDF output.** *Medium.* A 2026-11-06 probe rendered
+  "مرحبا" and "السلام عليكم" (bundled Noto Naskh Arabic). The letters join in both outputs, and the
+  direct raster draws the dots. In the PDF (viewed with poppler and with omnidoc's own PDF raster)
+  every dot is missing, although the content stream shows the mark glyphs (GIDs `0x0143`, `0x0145`)
+  at the same origin as their base glyphs. Not yet diagnosed: check the subset (`subset.go`) for
+  those GIDs, then mark placement. Related: `complex.go` reads only `XAdvance` from harfbuzz, so
+  GPOS `XOffset`/`YOffset` (mark attachment) are discarded on every output path.
+
 ## PDF — performance
 
 - ☐ **L1. Per-glyph paint allocations** (`paint.go transformPath` + `device.go rasterizeMask`, ~3 per
@@ -186,3 +221,6 @@ trusting any entry that has aged** — grep for the claimed symptom first.
     `flex-grow`/`stretch`/`fr` size items collectively and would have to be re-solved per fragmentainer.
     Already an owner-signed deferral, and the case with the least real-world demand.
 - ☐ **N4. Per-page float distribution.** *Medium.*
+- ☐ **N7. `@page`-level declarations on margin boxes.** *Small.* Margin boxes inherit the root
+  element's font and color (`marginBaseFrom`, `marginbox.go`), but a font or color declared on
+  `@page` itself is not applied: `UsedPage` does not carry those declarations.

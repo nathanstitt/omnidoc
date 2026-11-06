@@ -1996,5 +1996,36 @@ newline is kept.</p>
       handled here.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">45 / FONT FALLBACK</span>
+    <h2>Per-character font fallback</h2>
+    <p class="lede">A face that lacks a character no longer draws a box or a wrong
+      glyph. Each character is checked against the faces in the
+      <code>font-family</code> list, then the bundled scripts, then a fonts directory
+      the caller supplies, then installed fonts &mdash; the first face that has the
+      glyph draws it.</p>
+
+    <h4>Accented Latin</h4>
+    <p class="fbline">Zoë Brontë · Ñandú · Łódź · Čeština · Ångström · Øresund · Ősz</p>
+    <p class="caption">The bundled TeX&nbsp;Gyre faces map accented code points to
+      small&#8209;cap alternates in their own cmap, so &ldquo;Zoë&rdquo; once printed
+      with a small&#8209;cap &ldquo;e&rdquo;. A glyph is now found by its plain Adobe
+      Glyph List name first (<code>edieresis</code>, not <code>edieresis.sc</code>).</p>
+
+    <h4>Greek and Cyrillic</h4>
+    <p class="fbline">Ελληνικά · Αθήνα · Θεσσαλονίκη</p>
+    <p class="fbline">Москва · Київ · Беларусь · Србија</p>
+    <p class="caption">The Latin faces have no Greek or Cyrillic letters (or only part
+      of the Greek). These words come from the bundled Go fonts, which cover the WGL4
+      repertoire; a letter outside it goes on to the caller&rsquo;s fonts directory
+      and then installed fonts.</p>
+
+    <h4>Mixed in one line</h4>
+    <p class="fbline">Invoice for Zoë Ivanova (Иванова), Αθήνα &mdash; €1.250,00</p>
+    <p class="caption">One run of text can mix scripts: the fallback is per
+      character, so the Latin letters stay in the requested face and only the
+      letters it lacks change face.</p>
+  </section>
+
 </body>
 </html>

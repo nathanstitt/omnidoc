@@ -100,6 +100,21 @@ func TestBundledFontsPrintGreekCyrillicHebrewAndAccentedLatin(t *testing.T) {
 			t.Errorf("missing glyph: %s", l)
 		}
 	}
+	// Positive check: the PDF reopens and its text layer gives the words back,
+	// so each glyph was embedded with its /ToUnicode mapping.
+	reopened, err := OpenBytes(pdf.Bytes())
+	if err != nil {
+		t.Fatalf("reopen the PDF: %v", err)
+	}
+	var text bytes.Buffer
+	if err := reopened.WriteText(context.Background(), &text, MarkdownOptions{}); err != nil {
+		t.Fatalf("extract text: %v", err)
+	}
+	for _, word := range []string{"Zoë", "Ñandú", "Łódź", "Ελληνικά", "Москва", "Київ"} {
+		if !strings.Contains(text.String(), word) {
+			t.Errorf("the PDF text lacks %q; got %q", word, text.String())
+		}
+	}
 }
 
 // Through the public API, in hermetic bundled mode: box-drawing characters the

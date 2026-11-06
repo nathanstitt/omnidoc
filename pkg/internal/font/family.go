@@ -224,11 +224,13 @@ func (f *Face) Glyph(r rune) (outline *render.Path, advanceEm float64, ok bool) 
 	return f.prog.outline(gid), adv, true
 }
 
-// gidForRune resolves a rune to a glyph, preferring the standard glyph-name route
-// (rune → Adobe glyph name → GID) and falling back to the program's own cmap.
-// The name route is necessary for the bundled Type1 substitutes (TeX Gyre), whose
-// built-in encoding maps some lowercase code points to alternate glyphs; resolving
-// by name picks the expected outline, matching how the PDF simple-font path works.
+// gidForRune resolves a rune to a glyph in three steps: the standard Latin
+// glyph-name table (rune → name → GID), then any plain Adobe Glyph List name the
+// font carries (aglGIDs: "eacute", "uni0151"; suffixed alternates such as
+// "eacute.sc" are skipped), and last the program's own cmap. The name steps are
+// necessary for the bundled substitutes (TeX Gyre), whose built-in cmap maps
+// lowercase and accented code points to small-cap alternates; resolving by name
+// picks the expected outline, matching how the PDF simple-font path works.
 func (f *Face) gidForRune(r rune) (fonts.GID, bool) {
 	if name := runeToGlyphName(r); name != "" {
 		if gid, ok := f.names[name]; ok && gid != 0 {

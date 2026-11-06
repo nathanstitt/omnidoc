@@ -1237,3 +1237,29 @@ wider than its container
 When the box is _wider_ than the space it sits in, the leftover is negative. A naïve half‑split would give each margin a negative value and drag the box off the left edge of the page; the spec instead treats the auto margin as zero, so the box starts at the left and overflows to the right — what every browser does. The clamp is a one‑line floor, and the test that pins it is the reason it is not a one‑line bug.
 
 Vertical auto margins are untouched: in normal flow they compute to zero (CSS §10.6.3), and vertical centering with `auto` is a flex/grid feature that those paths resolve themselves. Only the horizontal axis is handled here.
+
+**45 / FONT FALLBACK**
+
+## Per-character font fallback
+
+A face that lacks a character no longer draws a box or a wrong glyph. Each character is checked against the faces in the `font-family` list, then the bundled scripts, then a fonts directory the caller supplies, then installed fonts — the first face that has the glyph draws it.
+
+#### Accented Latin
+
+Zoë Brontë · Ñandú · Łódź · Čeština · Ångström · Øresund · Ősz
+
+The bundled TeX Gyre faces map accented code points to small‑cap alternates in their own cmap, so “Zoë” once printed with a small‑cap “e”. A glyph is now found by its plain Adobe Glyph List name first (`edieresis`, not `edieresis.sc`).
+
+#### Greek and Cyrillic
+
+Ελληνικά · Αθήνα · Θεσσαλονίκη
+
+Москва · Київ · Беларусь · Србија
+
+The Latin faces have no Greek or Cyrillic letters (or only part of the Greek). These words come from the bundled Go fonts, which cover the WGL4 repertoire; a letter outside it goes on to the caller’s fonts directory and then installed fonts.
+
+#### Mixed in one line
+
+Invoice for Zoë Ivanova (Иванова), Αθήνα — €1.250,00
+
+One run of text can mix scripts: the fallback is per character, so the Latin letters stay in the requested face and only the letters it lacks change face.

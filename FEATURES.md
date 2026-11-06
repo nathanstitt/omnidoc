@@ -216,7 +216,8 @@ bullet's design rationale is in its PR:
   rather than mis-shifted.
 - **Repeated `<thead>` on continuation pages** (`pkg/internal/layout/css/tablepage.go`, `table.go`): a table
   split across pages repeats its header group on every page it spans, wherever the table starts on
-  the page, so a long table keeps its column headings. `<tfoot>` is drawn once, at the end of the table. Grid construction flattens the head/body/footer distinction away, so the header's bottom
+  the page, so a long table keeps its column headings. `<tfoot>` is drawn once, at the end of the
+  table. Grid construction flattens the head/body/footer distinction away, so the header's bottom
   Y is recorded on the table fragment as `HeaderBottom` and the cells above it are deep-cloned onto
   each tail. The tail's own `HeaderBottom` is then re-anchored to its copy, so a table spanning three
   or more pages keeps repeating.
@@ -248,7 +249,8 @@ bullet's design rationale is in its PR:
   pages, and the 16 margin boxes; `break-inside`; widows and orphans via mid-block line
   fragmentation; running headers and footers with page counters; `@page marks`/`bleed`;
   `string-set`/`string()`; `position: running()`/`content: element()`; and named-page multi-width
-  reflow.
+  reflow. Margin boxes inherit font family, size, weight, style and color from the root element;
+  their own declarations override. `@page`-level font declarations are not applied.
 - **`white-space`** (`pkg/internal/css` + `pkg/internal/layout/inline`): normal/nowrap/pre/pre-wrap/pre-line, plus tab
   stops.
 - **`overflow-wrap` / `word-break` — mid-word line breaking** (`pkg/internal/css/cascade.go`,
