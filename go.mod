@@ -5,7 +5,7 @@ go 1.26.0
 require (
 	github.com/HugoSmits86/nativewebp v1.3.0
 	github.com/adrg/sysfont v0.1.2
-	github.com/andybalholm/brotli v1.2.1
+	github.com/andybalholm/brotli v1.2.7
 	github.com/beevik/etree v1.6.0
 	github.com/benoitkugler/textlayout v0.3.2
 	github.com/srwiley/rasterx v0.0.0-20220730225603-2ab79fcdd4ef
