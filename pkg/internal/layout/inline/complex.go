@@ -12,11 +12,14 @@ package inline
 // their cluster indices, which is how a many-runes-to-one-glyph ligature or a
 // one-rune-to-many-glyphs decomposition is attributed back to the source text.
 //
-// DIRECTION: shaping is forced LEFT-TO-RIGHT even for right-to-left script. Harfbuzz
-// would otherwise emit visual order itself, which would then be reordered a second
-// time by the UAX#9 L2 pass in MakeVisualLine and come out backwards. Forcing LTR
-// keeps the whole pipeline in logical order right up to that single reorder — the
-// contextual forms are applied either way, only the output order differs.
+// DIRECTION: every script routed here (Arabic, Syriac, Thaana) is right-to-left, and
+// it is shaped RIGHT-TO-LEFT. Harfbuzz's Arabic shaper picks each letter's joining
+// form from its neighbours in the direction it is told; shaped left-to-right it
+// joined words backwards (in مرحبا, meem and alef came out isolated and beh
+// initial). Harfbuzz returns right-to-left output in visual order, so shapeComplex
+// reverses it back to logical order: the rest of the pipeline stays logical up to
+// the single UAX#9 L2 reorder in MakeVisualLine, which reverses the segment again and
+// so draws exactly the visual order harfbuzz produced.
 
 import (
 	"github.com/benoitkugler/textlayout/harfbuzz"
@@ -51,6 +54,9 @@ type shapedGlyph struct {
 	gid     uint16
 	advance float64 // em units (advance / upem)
 	runes   []rune  // the source runes of this glyph's cluster; may be several or none
+	// yOffset is harfbuzz's GPOS vertical placement in em units, positive up. The
+	// horizontal placement is folded into the advances instead (see foldXOffsets).
+	yOffset float64
 }
 
 // shapeComplex shapes text through harfbuzz using face's OpenType layout tables, in
@@ -74,9 +80,9 @@ func shapeComplex(face *pkgfont.Face, text []rune) ([]shapedGlyph, bool) {
 	buf := harfbuzz.NewBuffer()
 	buf.AddRunes(text, 0, -1)
 	buf.GuessSegmentProperties()
-	// Force logical order; see the DIRECTION note at the top of the file. The script
-	// and language harfbuzz guessed are kept — those select the shaping engine.
-	buf.Props.Direction = harfbuzz.LeftToRight
+	// See the DIRECTION note at the top of the file. The script and language harfbuzz
+	// guessed are kept — those select the shaping engine.
+	buf.Props.Direction = harfbuzz.RightToLeft
 	buf.Shape(hbFont, nil)
 	if len(buf.Info) == 0 {
 		return nil, false
@@ -87,14 +93,43 @@ func shapeComplex(face *pkgfont.Face, text []rune) ([]shapedGlyph, bool) {
 		return nil, false
 	}
 	out := make([]shapedGlyph, 0, len(buf.Info))
+	xOffsets := make([]float64, len(buf.Info))
 	for i, info := range buf.Info {
 		out = append(out, shapedGlyph{
 			gid:     uint16(info.Glyph),
 			advance: float64(buf.Pos[i].XAdvance) / upem,
 			runes:   clusterRunes(buf.Info, text, i),
+			yOffset: float64(buf.Pos[i].YOffset) / upem,
 		})
+		xOffsets[i] = float64(buf.Pos[i].XOffset) / upem
+	}
+	foldXOffsets(out, xOffsets)
+	// Harfbuzz's right-to-left output is in visual order; hand the pipeline logical
+	// order (see the DIRECTION note).
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
 	}
 	return out, true
+}
+
+// foldXOffsets applies harfbuzz's GPOS horizontal placements (mark attachment: an
+// Arabic dot moved under its letter) by redistributing advances, so every backend
+// that places glyphs by advance alone — the raster, the PDF writer, SVG — draws each
+// glyph where harfbuzz put it. out and xOffsets are in harfbuzz's visual output order,
+// which is the order the glyphs are finally drawn in (see the DIRECTION note).
+//
+// A glyph at pen p with x offset o is drawn at p+o. Giving the glyph before it an
+// advance larger by o, and the glyph itself an advance smaller by o, draws it at p+o
+// and leaves the pen after it unchanged. The segment's first glyph has no glyph
+// before it in the segment; harfbuzz gives offsets to marks, which never come first,
+// so its offset (none in practice) is left unapplied.
+func foldXOffsets(out []shapedGlyph, xOffsets []float64) {
+	for i := 1; i < len(out); i++ {
+		if o := xOffsets[i]; o != 0 {
+			out[i-1].advance += o
+			out[i].advance -= o
+		}
+	}
 }
 
 // clusterRunes returns the source runes glyph i stands for.

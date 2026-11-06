@@ -509,6 +509,9 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 						// would be a different wrong answer.
 						g.Advance = spacedAdvance(sg.advance*r.SizePt, false)
 						g.Runes = sg.runes
+						// A mark's GPOS vertical placement (positive = up) rides the same
+						// per-glyph shift as vertical-align, so every backend applies it.
+						g.BaselineShiftPt += sg.yOffset * r.SizePt
 						out = append(out, g)
 						lineCol += g.Advance
 					}

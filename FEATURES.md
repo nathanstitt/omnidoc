@@ -672,10 +672,15 @@ bullet's design rationale is in its PR:
   joining script — Arabic, Syriac, Thaana — is shaped as a whole segment through harfbuzz, which
   resolves the font's GSUB tables so letters take their initial/medial/final/isolated forms and
   ligatures fuse. Hebrew is non-joining and stays on the cheap per-rune path. `Face.OpenTypeFont`
-  exposes the SFNT, which satisfies `harfbuzz.FaceOpentype` directly. Shaping is forced
-  LEFT-TO-RIGHT so the pipeline stays logical up to the single L2 reorder; harfbuzz would otherwise
-  emit visual order and be reversed twice. Glyphs carry their cluster's runes exactly once, so
-  `/ToUnicode` neither duplicates nor drops text. Showcase §15 "Real script".
+  exposes the SFNT, which satisfies `harfbuzz.FaceOpentype` directly. Shaping runs RIGHT-TO-LEFT,
+  so each letter takes its joining form from its neighbours in reading order, and harfbuzz's
+  visual output is reversed back to logical order so the pipeline stays logical up to the single
+  L2 reorder, which restores harfbuzz's order. GPOS mark placement is kept: a mark's x offset is
+  folded into the advances (the glyph before it gains it, the mark loses it), so every path that
+  places glyphs by advance (CSS layout, margin boxes, SVG text) draws an Arabic dot under its
+  letter, in the raster and the PDF alike. The y offset rides the per-glyph baseline shift, which
+  only the CSS line emitter applies; margin boxes and SVG text drop it. Glyphs carry their cluster's runes exactly once, so `/ToUnicode` neither duplicates
+  nor drops text. Showcase §15 "Real script".
 - **Bundled RTL faces + per-character font fallback** (`pkg/internal/font/standard`, `pkg/internal/layout/font/cache.go`,
   `pkg/internal/layout/inline/shape.go`): Noto Sans Hebrew and Noto Naskh Arabic (both OFL 1.1, no Reserved
   Font Name) ship alongside the Latin substitutes. Each bundled face covers exactly ONE script — the

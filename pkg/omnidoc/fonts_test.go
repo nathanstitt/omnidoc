@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"image"
 	"os"
 	"path/filepath"
 	"strings"
@@ -148,5 +149,36 @@ func TestWithFallbackFontDirCoversWhatTheBundleLacks(t *testing.T) {
 	}
 	if n := missing(WithFallbackFontDir(dir)); n != 0 {
 		t.Errorf("%d characters still missing with the fonts directory", n)
+	}
+}
+
+// Arabic written to PDF draws what the direct raster draws: the same joined letters
+// and the same dots (mark glyphs, positioned by harfbuzz) — the PDF path places
+// glyphs by GID from the same layout, so the two rasters must agree.
+func TestArabicPDFMatchesDirectRaster(t *testing.T) {
+	src := `<!doctype html><html><head><style>@page { size: 400px 200px; margin: 20px }</style></head>` +
+		`<body style="font-size: 40px"><p dir="rtl">مرحبا عليكم</p></body></html>`
+	doc, err := OpenHTMLBytes([]byte(src), WithDefaultPaged(), WithBundledFonts())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	direct, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI, BundledFonts: true})
+	if err != nil {
+		t.Fatalf("direct raster: %v", err)
+	}
+	var pdf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	back, err := OpenBytes(pdf.Bytes())
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	viaPDF, err := back.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI, BundledFonts: true})
+	if err != nil {
+		t.Fatalf("PDF raster: %v", err)
+	}
+	if diff, n := compareImages(direct.(*image.RGBA), viaPDF.(*image.RGBA)); diff {
+		t.Errorf("the PDF raster differs from the direct raster in %d pixels", n)
 	}
 }

@@ -122,6 +122,11 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   U+0460 on, the historic letters and the letters of non-Russian languages). A missing letter goes
   on to the fallback directory and the installed fonts; in bundled mode with no directory it is
   drawn as `.notdef` with a log. Needs a wider OFL face.
+- ☐ **G11. GPOS vertical mark offsets outside CSS lines.** *Small.* `shapeComplex` keeps a mark's
+  y offset as the glyph's `BaselineShiftPt` (`complex.go`, `shape.go`), which only the CSS line
+  emitter applies (`fragment.go`). Margin-box text (`marginbox.go`) and SVG text
+  (`svg/draw/text.go`) drop it, so an Arabic mark harfbuzz raises or lowers sits at its default
+  height there. The x offset is folded into advances and applies everywhere.
 
 ## HTML/CSS — grid
 
@@ -162,16 +167,6 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   Remaining: a bundled OFL Symbol look-alike for the no-provider case (those runs are skipped today),
   AFM tables for exact base-14 advances when a PDF omits `/Widths`, and synthetic emboldening for a
   family missing a real variant. *Medium.* See `docs/PDF.md`.
-
-## PDF — writer
-
-- ☐ **W1. Arabic dot marks are missing from PDF output.** *Medium.* A 2026-11-06 probe rendered
-  "مرحبا" and "السلام عليكم" (bundled Noto Naskh Arabic). The letters join in both outputs, and the
-  direct raster draws the dots. In the PDF (viewed with poppler and with omnidoc's own PDF raster)
-  every dot is missing, although the content stream shows the mark glyphs (GIDs `0x0143`, `0x0145`)
-  at the same origin as their base glyphs. Not yet diagnosed: check the subset (`subset.go`) for
-  those GIDs, then mark placement. Related: `complex.go` reads only `XAdvance` from harfbuzz, so
-  GPOS `XOffset`/`YOffset` (mark attachment) are discarded on every output path.
 
 ## PDF — performance
 
