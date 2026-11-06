@@ -103,3 +103,28 @@ func TestLookupStyled(t *testing.T) {
 		}
 	}
 }
+
+// Cyrillic is not in TeX Gyre at all and accented Greek is missing, so both
+// fall back to the bundled Go fonts, in the requested style.
+func TestScriptFallbackCoversGreekAndCyrillic(t *testing.T) {
+	cases := []struct {
+		r            rune
+		bold, italic bool
+		want         string
+	}{
+		{'Ж', false, false, "Go-Regular"},
+		{'ж', true, false, "Go-Bold"},
+		{'ά', false, true, "Go-Italic"},
+		{'Ω', true, true, "Go-BoldItalic"},
+	}
+	for _, c := range cases {
+		sub, ok := ScriptFallback(c.r, c.bold, c.italic)
+		if !ok {
+			t.Errorf("ScriptFallback(%q) found no face", c.r)
+			continue
+		}
+		if sub.Name != c.want || sub.Kind != KindTrueType || len(sub.Data) == 0 {
+			t.Errorf("ScriptFallback(%q, bold=%v, italic=%v) = %s, want %s", c.r, c.bold, c.italic, sub.Name, c.want)
+		}
+	}
+}

@@ -2,8 +2,11 @@ package omnidoc
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -72,5 +75,27 @@ func TestDirFontProvider(t *testing.T) {
 	}
 	if _, ok := (DirFontProvider{}).LoadStyled("Foo", false, false); ok {
 		t.Error("zero-value DirFontProvider must never match")
+	}
+}
+
+// Names in Greek, Cyrillic, Hebrew and accented Latin print with the bundled
+// fonts alone: no rune reaches the .notdef path.
+func TestBundledFontsPrintGreekCyrillicHebrewAndAccentedLatin(t *testing.T) {
+	var logs []string
+	src := `<!doctype html><html style="font-family: sans-serif"><body>` +
+		`<p>Zoë Ñandú Łódź</p><p>Ελληνικά ά</p><p>Москва Київ</p><p>שלום</p></body></html>`
+	doc, err := OpenHTMLBytes([]byte(src), WithDefaultPaged(), WithBundledFonts(),
+		WithLogf(func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	var pdf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, l := range logs {
+		if strings.Contains(l, "no glyph for") {
+			t.Errorf("missing glyph: %s", l)
+		}
 	}
 }

@@ -225,6 +225,8 @@ func fallbackScriptOf(r rune) (string, bool) {
 		r >= 0x08A0 && r <= 0x08FF, r >= 0xFB50 && r <= 0xFDFF,
 		r >= 0xFE70 && r <= 0xFEFF:
 		return "arabic", true
+	case r >= 0x0370 && r <= 0x03FF, r >= 0x0400 && r <= 0x04FF:
+		return "greek-cyrillic", true
 	}
 	return "", false
 }

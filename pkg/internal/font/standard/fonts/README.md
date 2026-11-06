@@ -45,3 +45,5 @@ All are permissively licensed and MIT-compatible — no GPL/AGPL.
 Sources: TeX Gyre collection (GUST e-foundry, via CTAN
 `fonts/tex-gyre/type1/` — `qhv*`/`qtm*`); Inconsolata (The Inconsolata Project
 Authors, via the googlefonts/Inconsolata release).
+
+Greek and Cyrillic fall back to the Go fonts (Go-Regular, Go-Bold, Go-Italic, Go-BoldItalic) embedded from `golang.org/x/image/font/gofont`, BSD-3-Clause, © Bigelow & Holmes Inc. and The Go Authors.
