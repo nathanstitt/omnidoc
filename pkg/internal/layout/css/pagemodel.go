@@ -137,6 +137,7 @@ func groupRuns(blocks []*Fragment) []pageRun {
 // no @page rule), so existing geometry is preserved while content is inset by the
 // margins. It never panics (the same page-boundary recover as Layout).
 func (e *Engine) LayoutPagedDoc(ctx context.Context, root *cssbox.Box, cfg PagedConfig) (pages *layout.Pages, err error) {
+	e.setMarginBase(root)
 	if !cfg.Paged {
 		return e.Layout(ctx, root, cfg.FallbackW) // single tall page (handles canvas bg)
 	}

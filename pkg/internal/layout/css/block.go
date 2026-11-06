@@ -39,6 +39,9 @@ type Engine struct {
 	// irrelevant rules per element.
 	authorSheets []gcss.Stylesheet
 	logf         func(string, ...any)
+	// marginBase is the style @page margin boxes inherit (the root element's
+	// font and color), set at the start of a paged layout. Zero means "not set".
+	marginBase gcss.ComputedStyle
 	// measures memoizes per-box min/max-content widths within ONE layout. measureContent
 	// is a pure function of the box subtree and the (fixed) face cache, but table auto
 	// layout, grid track sizing, and flex base sizing each measure every cell/item for

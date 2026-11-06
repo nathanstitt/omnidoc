@@ -1,6 +1,7 @@
 package omnidoc
 
 import (
+	"bytes"
 	"context"
 	"image"
 	"image/color"
@@ -96,5 +97,28 @@ func TestWithDefaultPagedNoAtPageFallsBackToLetter(t *testing.T) {
 	if math.Abs(pg.WidthPt-LetterWidthPt) > 0.5 || math.Abs(pg.HeightPt-LetterHeightPt) > 0.5 {
 		t.Errorf("page size = %.0f x %.0f, want Letter %d x %d (fallback)",
 			pg.WidthPt, pg.HeightPt, LetterWidthPt, LetterHeightPt)
+	}
+}
+
+// CSS Paged Media: the page context inherits from the root element, so a
+// footer takes the document's font. With html { font-family: sans-serif } the
+// PDF must embed only the sans face; a serif footer would add TeX Gyre Termes.
+func TestMarginBoxInheritsTheRootFont(t *testing.T) {
+	src := `<!doctype html><html style="font-family: sans-serif"><head><style>
+		@page { size: Letter; margin: 0.5in; @bottom-right { content: "Page " counter(page) " of " counter(pages) } }
+	</style></head><body><p>Body text</p></body></html>`
+	doc, err := OpenHTMLBytes([]byte(src), WithDefaultPaged(), WithBundledFonts())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	var pdf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if !bytes.Contains(pdf.Bytes(), []byte("TeXGyreHeros")) {
+		t.Fatal("the sans face is not embedded")
+	}
+	if bytes.Contains(pdf.Bytes(), []byte("TeXGyreTermes")) {
+		t.Error("the footer used the serif face, not the root's sans-serif")
 	}
 }

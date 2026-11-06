@@ -27,6 +27,7 @@ import (
 // paginated relative ancestor) are undistributed and ride the first page — a documented
 // deferral. The html/body wrapper's border/background is fragmented per page.
 func (e *Engine) LayoutPaged(ctx context.Context, root *cssbox.Box, viewportW, pageH float64) (pages *layout.Pages, err error) {
+	e.setMarginBase(root)
 	if pageH <= 0 {
 		return e.Layout(ctx, root, viewportW) // handles canvas-background propagation itself
 	}
