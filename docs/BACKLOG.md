@@ -127,6 +127,22 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   sideways Arabic glyph in `writing-mode: vertical-*` loses its harfbuzz mark placement (the dot sits
   at its base's pen). Horizontal CSS lines, margin boxes and SVG text apply it.
 
+## HTML/CSS — flex
+
+- ☐ **H1. A content-sized row flex item with horizontal margin, padding or border wraps its text.**
+  *Open (Small–medium).* Reproduction: `<div style="display:flex"><div style="margin-right:48px">
+  <div>Northwind Traders</div></div></div>` prints "Northwind / Traders" on two lines with the whole
+  row free; `padding-right:48px` does the same, `flex:none` does not help, and `gap:48px` with no
+  edges on the item does not wrap. Cause: the flex base size is the item's content max-content
+  (`flex.go:950`, `measureMaxContent`, which excludes the box's own edges, `measure.go:15`), but
+  `layoutFlexItem` passes that used main size to `layoutBlock` as the containing-block width
+  (`flex.go:1020`), and `resolveContentWidth` subtracts the item's margins, borders and padding from
+  it (`block.go:1429`, `block.go:1445`). The content box is therefore narrower than max-content by
+  exactly the item's horizontal edges. Fix: treat `usedMain` as the border box everywhere — add
+  `horizontalEdges(it)` to a row item's content-based base size and automatic minimum (and to a
+  content-box definite `width`), and lay the item out at `usedMain + mainStart + mainEnd` so
+  `layoutBlock` takes back only the margins. Found by Books invoice PDFs (party blocks).
+
 ## HTML/CSS — grid
 
 - ☐ **I1. Named-LINE placement** (`grid-column: start/end` referencing `[name]`s). *Deferred (Medium).*
