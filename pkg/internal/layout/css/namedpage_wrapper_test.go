@@ -87,3 +87,51 @@ func assertWrapperSliced(t *testing.T, pages *layout.Pages) {
 		}
 	}
 }
+
+// The body's trailing padding and bottom border belong on the last page, inside its
+// content box: when the last block leaves too little room for them, the bucketer
+// moves (or splits) it so the wrapper closes within the page rather than in the
+// bottom margin band, clipped at the bitmap edge.
+func TestBodyBottomBorderFitsTheLastPage(t *testing.T) {
+	var paras strings.Builder
+	for i := 0; i < 16; i++ {
+		paras.WriteString("<p>para</p>")
+	}
+	for _, named := range []bool{false, true} {
+		css := `@page { size: 300px 300px; margin: 20px 0 }`
+		tail := ""
+		if named {
+			css += `
+		@page wide { size: 500px 300px; margin: 20px 0 }`
+			tail = `<div class="wide"><p>wide</p></div>`
+		}
+		// 16 x 30px = 480px of paragraphs over 260px pages: page 2 ends 6+10+480-260 =
+		// 236px down, leaving 24px — less than the body's 36px padding + 6px border.
+		src := `<html><head><style>` + css + `
+		.wide { page: wide }
+		body { margin: 0; border: 6px solid black; padding: 10px 10px 36px 10px }
+		p { margin: 0; height: 30px }
+	</style></head><body>` + tail + paras.String() + `</body></html>`
+		if named {
+			src = strings.Replace(src, tail+paras.String(), paras.String()+tail+paras.String(), 1)
+		}
+		root := buildRoot(t, src, nil)
+		pages, err := New(nil, nil, nil).LayoutPagedDoc(context.Background(), root, pagedConfigFor(css, 300, 300, false))
+		if err != nil {
+			t.Fatalf("LayoutPagedDoc: %v", err)
+		}
+		last := pages.Pages[len(pages.Pages)-1]
+		found := false
+		for _, it := range last.Items {
+			if it.Kind == layout.BorderKind && it.Border.Side == layout.EdgeBottom && it.Border.HPt == 6 {
+				found = true
+				if bottom := it.Border.YPt + it.Border.HPt; bottom > last.HeightPt-20+0.5 {
+					t.Errorf("named=%v: the body bottom border ends at y=%.1f, below the content box (%.1f)", named, bottom, last.HeightPt-20)
+				}
+			}
+		}
+		if !found {
+			t.Errorf("named=%v: the last page draws no body bottom border", named)
+		}
+	}
+}

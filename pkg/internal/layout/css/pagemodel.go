@@ -200,7 +200,7 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 	}
 
 	cbWidth := contentWidth(body, g0.contentW)
-	buckets, grown := bucketBlocksGrowing(body.Children, g0.contentH, cbWidth, e.logf)
+	buckets, grown := bucketBlocksGrowing(body.Children, g0.contentH, cbWidth, wrapperDecorationBottom(root, body), e.logf)
 	applySplitGrowth(grown, root.Floats, root, body)
 
 	// Pull page 0's top up to include the wrapper's own top border/background (same as
@@ -571,7 +571,7 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 
 	var all []runBucket
 	attributed := map[*Fragment]bool{} // floats routed to some run (for the unattributed-float diagnostic below)
-	for _, r := range runs {
+	for ri, r := range runs {
 		geom, blocks := getLayout(r.name)
 		// Take this run's blocks BY INDEX from the matching-width layout. The cssbox tree
 		// is identical across widths, so body.Children indices align run-for-run.
@@ -580,7 +580,13 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		}
 		runBlocks := blocks[r.start:r.end]
 		cb := contentWidth(bodyFragment(layoutByWidth[geom.contentW]), geom.contentW)
-		bks, grown := bucketBlocksGrowing(runBlocks, geom.contentH, cb, e.logf)
+		// Only the document's last run holds the wrapper's bottom edge.
+		wrapperBottom := 0.0
+		if ri == len(runs)-1 {
+			frag := layoutByWidth[geom.contentW]
+			wrapperBottom = wrapperDecorationBottom(frag, bodyFragment(frag))
+		}
+		bks, grown := bucketBlocksGrowing(runBlocks, geom.contentH, cb, wrapperBottom, e.logf)
 		applySplitGrowth(grown, nil, bodyFragment(layoutByWidth[geom.contentW]))
 		// The document's first page also holds the html/body wrapper's top border and
 		// padding, as on the single-geometry path (paginateDoc).

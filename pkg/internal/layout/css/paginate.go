@@ -2,6 +2,7 @@ package css
 
 import (
 	"context"
+	"math"
 
 	gcss "github.com/nathanstitt/omnidoc/pkg/internal/css"
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
@@ -72,7 +73,7 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 	// the body content width (border box minus the body's own border + padding). It is
 	// needed to recover a block's used top margin when retaining it at an unforced break.
 	cbWidth := contentWidth(body, viewportW)
-	buckets, grown := bucketBlocksGrowing(body.Children, pageH, cbWidth, e.logf)
+	buckets, grown := bucketBlocksGrowing(body.Children, pageH, cbWidth, wrapperDecorationBottom(root, body), e.logf)
 	applySplitGrowth(grown, root.Floats, root, body)
 
 	// Pull the FIRST page's top up to the outermost wrapper border-box top when the
@@ -432,7 +433,7 @@ func splitFloatsByPage(root *Fragment, buckets []pageBucket) [][]*Fragment {
 // content at its END (a nested break propagated to the top-level ancestor), so the
 // common `.page-break { break-before: page }` on a nested element is honored.
 func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, ...any)) []pageBucket {
-	buckets, _ := bucketBlocksGrowing(blocks, pageH, cbWidth, logf)
+	buckets, _ := bucketBlocksGrowing(blocks, pageH, cbWidth, 0, logf)
 	return buckets
 }
 
@@ -440,7 +441,12 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 // (repeated table headers), in the order they happened. The blocks after a grown tail
 // are moved down here; the caller must move the out-of-flow content it owns (the
 // root's floats) and the wrapper's height by the same growths — see applySplitGrowth.
-func bucketBlocksGrowing(blocks []*Fragment, pageH, cbWidth float64, logf func(string, ...any)) ([]pageBucket, []splitGrowth) {
+//
+// wrapperBottom, when > 0, is the page-space bottom of the html/body wrapper's drawn
+// bottom edge (wrapperDecorationBottom). The space between the last block and it —
+// the wrapper's bottom padding and border — must fit on the last page too, so the last
+// block is placed, moved or split as if it reached down to wrapperBottom.
+func bucketBlocksGrowing(blocks []*Fragment, pageH, cbWidth, wrapperBottom float64, logf func(string, ...any)) ([]pageBucket, []splitGrowth) {
 	if len(blocks) == 0 {
 		return []pageBucket{{top: 0}}, nil
 	}
@@ -453,6 +459,9 @@ func bucketBlocksGrowing(blocks []*Fragment, pageH, cbWidth float64, logf func(s
 		if dy := totalGrowth(res.grow); dy > 0 {
 			shiftFragments((*work)[i+2:], dy)
 			grown = append(grown, res.grow...)
+			if wrapperBottom > 0 {
+				wrapperBottom += dy
+			}
 		}
 	}
 	// work is a mutable copy: a widows/orphans line split replaces the current block
@@ -483,7 +492,17 @@ func bucketBlocksGrowing(blocks []*Fragment, pageH, cbWidth float64, logf func(s
 	for i := 0; i < len(work); i++ {
 		b := work[i]
 		forcedBefore, forcedAfter := effectiveBreaks(b)
-		overflow := len(cur.blocks) > 0 && (b.Y+b.H)-cur.top > pageH
+		// The last block also carries the wrapper's trailing padding and border, but
+		// only on the page where it ends: a last block that overflows the page even
+		// without them splits at the full page, and the reserve applies to its tail.
+		reserveAt := func() float64 {
+			if wrapperBottom > 0 && i == len(work)-1 && (b.Y+b.H)-cur.top <= pageH {
+				return math.Max(0, wrapperBottom-(b.Y+b.H))
+			}
+			return 0
+		}
+		reserve := reserveAt()
+		overflow := len(cur.blocks) > 0 && (b.Y+b.H+reserve)-cur.top > pageH
 		// break-*: avoid keep-together (CSS Fragmentation §4.2): when an UNFORCED
 		// (overflow) break would land between the previous block and b, but that join is
 		// bound by break-after: avoid (on the previous block) or break-before: avoid (on
@@ -551,7 +570,7 @@ func bucketBlocksGrowing(blocks []*Fragment, pageH, cbWidth float64, logf func(s
 			}
 		}
 		if overflow && !forcedBefore && len(cur.blocks) > 0 && lineSplittable(b) {
-			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
+			res := splitAnyBlockForPage(b, cur.top+pageH-reserve, widowsOf(b), orphansOf(b))
 			if res.head != nil && res.tail != nil {
 				noteSplit(res.head, res.tail)
 				cur.blocks = append(cur.blocks, res.head)
@@ -595,8 +614,9 @@ func bucketBlocksGrowing(blocks []*Fragment, pageH, cbWidth float64, logf func(s
 		// closing the previous page (or is a no-op on the first block), and its tail
 		// keeps the break-before style, so excluding forced blocks here left every page
 		// after the first overflowing and clipped.
-		if len(cur.blocks) == 0 && lineSplittable(b) && (b.Y+b.H)-cur.top > pageH {
-			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
+		reserve = reserveAt() // cur.top may have moved to this block's page
+		if len(cur.blocks) == 0 && lineSplittable(b) && (b.Y+b.H+reserve)-cur.top > pageH {
+			res := splitAnyBlockForPage(b, cur.top+pageH-reserve, widowsOf(b), orphansOf(b))
 			if res.head != nil && res.tail != nil {
 				noteSplit(res.head, res.tail)
 				cur.blocks = append(cur.blocks, res.head)
@@ -696,6 +716,22 @@ func wrapperDecorationTop(f *Fragment, fallback float64) float64 {
 		}
 	}
 	return fallback
+}
+
+// wrapperDecorationBottom returns the page-space bottom of the lowest drawn bottom
+// border among the html/body wrappers, or 0 when neither draws one. Only a bottom
+// edge is reserved on the last page: a background has no edge to cut off.
+func wrapperDecorationBottom(wrappers ...*Fragment) float64 {
+	bottom := 0.0
+	for _, f := range wrappers {
+		if f == nil {
+			continue
+		}
+		if e := f.Border[layout.EdgeBottom]; e.Width > 0 && e.Style != layout.BorderNone {
+			bottom = math.Max(bottom, f.Y+f.H)
+		}
+	}
+	return bottom
 }
 
 // breakAvoidBetween reports whether a break between block prev and block b is
