@@ -1,9 +1,11 @@
 package css
 
 import (
+	"math"
 	"sort"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
+	"github.com/nathanstitt/omnidoc/pkg/internal/layout/cssbox"
 )
 
 // splitTableForPage splits a table fragment BETWEEN rows at pageBottom. The CSS table
@@ -58,11 +60,9 @@ func splitTableForPage(tbl *Fragment, pageBottom float64) splitResult {
 	tail.H = (tbl.Y + tbl.H) - splitY
 	head.Border[layout.EdgeBottom] = BorderEdge{}
 	tail.Border[layout.EdgeTop] = BorderEdge{}
-	// Collapsed border strips, if any, are dropped on the split (a documented limitation —
-	// the collapsed grid is computed table-wide and is not re-derived per page fragment).
-	head.Collapsed, tail.Collapsed = nil, nil
-	repeatHeaderOnTail(tbl, &tail, splitY)
-	return splitResult{head: &head, tail: &tail}
+	head.Collapsed, tail.Collapsed = splitCollapsedBorders(tbl.Collapsed, splitY)
+	added := repeatHeaderOnTail(tbl, &tail, splitY)
+	return splitResult{head: &head, tail: &tail, grow: growthAt(tbl, added)}
 }
 
 // splitTableRowThroughCells splits the straddling row's cells at pageBottom, producing
@@ -115,12 +115,10 @@ func splitTableRowThroughCells(tbl *Fragment, row tableRow, pageBottom float64, 
 	tail.H = (tbl.Y + tbl.H) - tail.Y
 	head.Border[layout.EdgeBottom] = BorderEdge{}
 	tail.Border[layout.EdgeTop] = BorderEdge{}
-	// Collapsed border strips are table-wide and not re-derived per fragment (the same
-	// documented limitation as the between-rows path).
-	head.Collapsed, tail.Collapsed = nil, nil
+	head.Collapsed, tail.Collapsed = splitCollapsedBorders(tbl.Collapsed, pageBottom)
 	distributeOutOfFlow(tbl, &head, &tail, pageBottom)
-	repeatHeaderOnTail(tbl, &tail, pageBottom)
-	return splitResult{head: &head, tail: &tail}, true
+	added := repeatHeaderOnTail(tbl, &tail, pageBottom)
+	return splitResult{head: &head, tail: &tail, grow: growthAt(tbl, added)}, true
 }
 
 // repeatHeaderOnTail prepends a copy of the table's <thead> cells to the tail fragment,
@@ -133,32 +131,62 @@ func splitTableRowThroughCells(tbl *Fragment, row tableRow, pageBottom float64, 
 // The cells are deep-cloned rather than shared: the same header appears on every
 // continuation page, and each page shifts its fragments into a local frame in place, so
 // sharing one cell across pages would have each shift corrupt the others.
-func repeatHeaderOnTail(tbl, tail *Fragment, splitY float64) {
+func repeatHeaderOnTail(tbl, tail *Fragment, splitY float64) (added float64) {
 	if tbl.HeaderBottom <= tbl.Y || splitY <= tbl.HeaderBottom+0.5 {
-		return
+		return 0
+	}
+	// The header starts below a top caption: the caption belongs to the table's first
+	// part only, so it is neither repeated nor counted in the repeated height.
+	headerTop := tbl.Y
+	for _, c := range tbl.Children {
+		if isCaptionFragment(c) && c.Y+c.H <= tbl.HeaderBottom+0.5 && c.Y+c.H > headerTop {
+			headerTop = c.Y + c.H
+		}
 	}
 	var repeated []*Fragment
 	for _, c := range tbl.Children {
-		if c.IsFloat || c.IsPositioned || c.Y+c.H > tbl.HeaderBottom+0.5 {
+		if c.IsFloat || c.IsPositioned || isCaptionFragment(c) || c.Y+c.H > tbl.HeaderBottom+0.5 {
 			continue // not a header cell
 		}
 		// cloneFloatForPageMap is a general alias-preserving deep clone (its name is
 		// historical — it is not float-specific); the seen map is per-cell because
 		// header cells share no descendants.
 		clone := cloneFloatForPageMap(c, map[*Fragment]*Fragment{})
-		translateFragment(clone, 0, tail.Y-tbl.Y)
+		translateFragment(clone, 0, tail.Y-headerTop)
 		repeated = append(repeated, clone)
 	}
 	if len(repeated) == 0 {
-		return
+		return 0
 	}
 	// The repeated header occupies space at the top of the tail, so the body cells that
-	// follow it move down by its height and the tail grows to match.
-	headerH := tbl.HeaderBottom - tbl.Y
+	// follow it move down by its height and the tail grows to match. The caller reports
+	// that growth (splitResult.grow) so the content after the table moves down too.
+	headerH := tbl.HeaderBottom - headerTop
 	for _, c := range tail.Children {
 		translateFragment(c, 0, headerH)
 	}
 	tail.Children = append(repeated, tail.Children...)
+	// The collapsed grid lines move with the body cells, and the header's own lines are
+	// copied with the header — except its bottom rule, which the tail's first row
+	// already draws at the same place as its top rule.
+	for i := range tail.Collapsed {
+		tail.Collapsed[i].YPt += headerH
+	}
+	for _, b := range tbl.Collapsed {
+		top, bottom := b.YPt, b.YPt+b.HPt
+		if isHorizontalStrip(b) {
+			mid := b.YPt + b.HPt/2
+			top, bottom = mid, mid
+			if mid > tbl.HeaderBottom-0.5 {
+				continue // the header's bottom rule (or a later line)
+			}
+		}
+		if top < headerTop-0.5 || bottom > tbl.HeaderBottom+0.5 {
+			continue
+		}
+		b.YPt += tail.Y - headerTop
+		tail.Collapsed = append(tail.Collapsed, b)
+	}
 	tail.H += headerH
 	// The tail now carries its own copy of the header at its top. Re-anchor
 	// HeaderBottom to THAT copy, so if the tail is split again — a table spanning three
@@ -166,6 +194,50 @@ func repeatHeaderOnTail(tbl, tail *Fragment, splitY float64) {
 	// original table's value here would point at coordinates the tail no longer has,
 	// and the repeat would silently stop after the second page.
 	tail.HeaderBottom = tail.Y + headerH
+	return headerH
+}
+
+// splitCollapsedBorders divides a collapsed table's grid strips at the page-space Y
+// splitY. A horizontal rule goes to the side its centre line is on, and to BOTH when it
+// sits on splitY (the bottom rule of the head's last row is also the top rule of the
+// tail's first row). A vertical rule is clipped to each side's extent, so a column rule
+// through a row split mid-cell continues on the next page.
+func splitCollapsedBorders(strips []layout.BorderItem, splitY float64) (head, tail []layout.BorderItem) {
+	for _, b := range strips {
+		if isHorizontalStrip(b) {
+			mid := b.YPt + b.HPt/2
+			if mid <= splitY+0.5 {
+				head = append(head, b)
+			}
+			if mid >= splitY-0.5 {
+				tail = append(tail, b)
+			}
+			continue
+		}
+		if b.YPt < splitY {
+			h := b
+			h.HPt = math.Min(b.YPt+b.HPt, splitY) - b.YPt
+			head = append(head, h)
+		}
+		if b.YPt+b.HPt > splitY {
+			t := b
+			t.YPt = math.Max(b.YPt, splitY)
+			t.HPt = b.YPt + b.HPt - t.YPt
+			tail = append(tail, t)
+		}
+	}
+	return head, tail
+}
+
+// isHorizontalStrip reports whether a collapsed grid strip is a row rule (top or
+// bottom side) rather than a column rule.
+func isHorizontalStrip(b layout.BorderItem) bool {
+	return b.Side == layout.EdgeTop || b.Side == layout.EdgeBottom
+}
+
+// isCaptionFragment reports whether f is a table caption's fragment.
+func isCaptionFragment(f *Fragment) bool {
+	return f != nil && f.Box != nil && f.Box.Display == cssbox.DisplayTableCaption
 }
 
 // tableRow is one recovered table row: the vertical extent of a band of cells that share

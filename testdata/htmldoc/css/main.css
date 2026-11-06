@@ -1339,3 +1339,10 @@ a.seen:visited { color: #6a9a3a; }
   padding: 0 20px;
   border: 4px solid #3a4a5a;
 }
+
+/* ----- per-character font fallback specimen (section 45) ------------------- */
+.fbline {
+  font-family: "TeX Gyre Termes", serif;
+  font-size: 18px;
+  margin: 4px 0;
+}

@@ -39,6 +39,9 @@ type Engine struct {
 	// irrelevant rules per element.
 	authorSheets []gcss.Stylesheet
 	logf         func(string, ...any)
+	// marginBase is the style @page margin boxes inherit (the root element's
+	// font and color), set at the start of a paged layout. Zero means "not set".
+	marginBase gcss.ComputedStyle
 	// measures memoizes per-box min/max-content widths within ONE layout. measureContent
 	// is a pure function of the box subtree and the (fixed) face cache, but table auto
 	// layout, grid track sizing, and flex base sizing each measure every cell/item for
@@ -1719,6 +1722,12 @@ func shiftFragmentExtras(f *Fragment, dx, dy float64) {
 		f.BgImage.OriginY += dy
 		f.BgImage.ClipX += dx
 		f.BgImage.ClipY += dy
+	}
+	// HeaderBottom is a Y in the same frame as f.Y; a table moved into page space
+	// must carry it along, or splitTableForPage's `HeaderBottom <= Y` guard sees
+	// the header above the table and skips the repeat.
+	if f.HeaderBottom != 0 {
+		f.HeaderBottom += dy
 	}
 	for i := range f.Collapsed {
 		f.Collapsed[i].XPt += dx

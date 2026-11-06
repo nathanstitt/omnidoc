@@ -107,6 +107,13 @@ func (p *placedGlyph) matrix(tm render.Matrix) render.Matrix {
 		xs = 1 // defensive: a zero-initialised placedGlyph must still paint
 	}
 	m := render.Scale(size*xs, -size)
+	if (!p.vertical || p.rotateRad != 0) && (p.glyph.XShiftPt != 0 || p.glyph.BaselineShiftPt != 0) {
+		// A GPOS mark placement (an Arabic dot on its letter) moves the glyph off its
+		// pen in the glyph's own frame, before any rotation, so a sideways glyph in a
+		// vertical run keeps its dot too. An upright glyph in a vertical run is laid
+		// out on the vertical axis, where the horizontal placement does not apply.
+		m = m.Mul(render.Translate(p.glyph.XShiftPt, -p.glyph.BaselineShiftPt))
+	}
 	if p.rotateRad != 0 {
 		m = m.Mul(render.Rotate(p.rotateRad))
 	}

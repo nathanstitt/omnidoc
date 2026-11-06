@@ -215,11 +215,18 @@ bullet's design rationale is in its PR:
   untouched, since their Y is already the page-local offset, and a percentage `bottom` is declined
   rather than mis-shifted.
 - **Repeated `<thead>` on continuation pages** (`pkg/internal/layout/css/tablepage.go`, `table.go`): a table
-  split across pages repeats its header rows on every continuation, so a long table keeps its column
-  headings. Grid construction flattens the head/body/footer distinction away, so the header's bottom
+  split across pages repeats its header group on every page it spans, wherever the table starts on
+  the page, so a long table keeps its column headings. `<tfoot>` is drawn once, at the end of the
+  table. Grid construction flattens the head/body/footer distinction away, so the header's bottom
   Y is recorded on the table fragment as `HeaderBottom` and the cells above it are deep-cloned onto
   each tail. The tail's own `HeaderBottom` is then re-anchored to its copy, so a table spanning three
-  or more pages keeps repeating.
+  or more pages keeps repeating. A top `<caption>` stays with the table's first part and is not
+  repeated. Each repeat makes the tail taller, and that growth is carried to everything after the
+  table (later siblings at any depth, later blocks, root floats, and the html/body wrapper), so the
+  content that follows starts below the table's last row. A `border-collapse: collapse` table
+  keeps its grid lines on every page: the strips are divided at the split (a row rule on the
+  split line closes the head and opens the tail; a column rule through a row split mid-cell is
+  clipped to each side), and the header's rules repeat with the header.
 - **Mid-cell table splitting** (`pkg/internal/layout/css/tablepage.go`): a table row taller than the page —
   including a single-row table — splits THROUGH its cells rather than overflowing and being clipped.
   A cell's content is an ordinary fragment spine, so the recursive splitter handles it with no
@@ -248,7 +255,11 @@ bullet's design rationale is in its PR:
   pages, and the 16 margin boxes; `break-inside`; widows and orphans via mid-block line
   fragmentation; running headers and footers with page counters; `@page marks`/`bleed`;
   `string-set`/`string()`; `position: running()`/`content: element()`; and named-page multi-width
-  reflow.
+  reflow. Margin boxes inherit font family, size, weight, style and color from the root element;
+  their own declarations override. `@page`-level font declarations are not applied. The html/body
+  wrapper's border and background are one box sliced across pages on both the single-geometry and
+  the named-page paths: the top edge (with the wrapper's top padding) on the first page only, the
+  bottom edge on the last page only, and on every other page the box runs to the content bottom.
 - **`white-space`** (`pkg/internal/css` + `pkg/internal/layout/inline`): normal/nowrap/pre/pre-wrap/pre-line, plus tab
   stops.
 - **`overflow-wrap` / `word-break` — mid-word line breaking** (`pkg/internal/css/cascade.go`,
@@ -664,18 +675,32 @@ bullet's design rationale is in its PR:
   joining script — Arabic, Syriac, Thaana — is shaped as a whole segment through harfbuzz, which
   resolves the font's GSUB tables so letters take their initial/medial/final/isolated forms and
   ligatures fuse. Hebrew is non-joining and stays on the cheap per-rune path. `Face.OpenTypeFont`
-  exposes the SFNT, which satisfies `harfbuzz.FaceOpentype` directly. Shaping is forced
-  LEFT-TO-RIGHT so the pipeline stays logical up to the single L2 reorder; harfbuzz would otherwise
-  emit visual order and be reversed twice. Glyphs carry their cluster's runes exactly once, so
-  `/ToUnicode` neither duplicates nor drops text. Showcase §15 "Real script".
-- **Bundled RTL faces + per-rune script fallback** (`pkg/internal/font/standard`, `pkg/internal/layout/font/cache.go`,
+  exposes the SFNT, which satisfies `harfbuzz.FaceOpentype` directly. Shaping runs RIGHT-TO-LEFT,
+  so each letter takes its joining form from its neighbours in reading order, and harfbuzz's
+  visual output is reversed back to logical order so the pipeline stays logical up to the single
+  L2 reorder, which restores harfbuzz's order. GPOS mark placement is kept as a per-glyph paint
+  shift (`XShiftPt`, and `BaselineShiftPt` for y) that moves a mark's ink without moving the pen or
+  reordering glyphs. A cluster's runes ride on one glyph; its other glyphs carry the cluster's first
+  rune as `BidiRune`, which the bidi reorder uses as their class, so a whole cluster stays in its
+  right-to-left run even after Latin text (`Name: بيت`). CSS lines,
+  margin boxes and SVG text (including sideways glyphs in a vertical run) all apply it, so an Arabic
+  dot sits on its letter in the raster and the PDF alike, also at the end of a word and after Latin
+  text. Glyphs carry their cluster's runes exactly once, so `/ToUnicode` neither duplicates
+  nor drops text. Showcase §15 "Real script".
+- **Bundled RTL faces + per-character font fallback** (`pkg/internal/font/standard`, `pkg/internal/layout/font/cache.go`,
   `pkg/internal/layout/inline/shape.go`): Noto Sans Hebrew and Noto Naskh Arabic (both OFL 1.1, no Reserved
   Font Name) ship alongside the Latin substitutes. Each bundled face covers exactly ONE script — the
   Latin faces have no Hebrew or Arabic, the Noto faces have no Latin — so the covering face resolves
-  per **rune**, not per run. A Hebrew or Arabic phrase inside an otherwise-Latin paragraph now shapes
-  instead of being silently dropped. Results cache per (script, style), and the fallback consults
-  bundled faces only. A fallback glyph carries the face it resolved from, since a GID is only
-  meaningful against its own face.
+  per **rune**, not per run. Per-character font fallback (CSS Fonts 4 §5.3): a character the run's
+  face lacks is looked up in each later family of the `font-family` list, then the bundled script
+  faces (Hebrew, Arabic, Greek, Cyrillic), then the fonts of a caller-supplied directory
+  (`WithFallbackFontDir`), then installed fallback families (Noto, DejaVu and the platform CJK,
+  Indic, Thai and symbol fonts; emoji fonts first for emoji). Each candidate must have the glyph.
+  Bundled mode (`WithBundledFonts`) skips installed fonts, unless the caller supplies a provider,
+  but keeps the supplied directory. A directory face serves every style (no bold/italic
+  selection). The directory skips font collections (`.ttc`, `.otc`) and unreadable files with a log. Answers cache
+  per (rune, family list, style). A fallback glyph carries the face it resolved from, since a GID is
+  only meaningful against its own face.
 - **Vertical font metrics** (`pkg/internal/font/program.go`, `family.go`): `Face.GlyphVAdvance` and
   `Face.VMetrics` expose `vmtx`/`vhea` alongside the horizontal `GlyphAdvance`/`Metrics`, for
   vertical writing modes. **The advance is normalized to a POSITIVE downward distance in em units**

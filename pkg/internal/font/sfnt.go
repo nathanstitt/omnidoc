@@ -62,7 +62,8 @@ func LoadSFNT(data []byte) (*Face, error) {
 	if sfntHasTable(sfnt, "CFF ") {
 		kind = ProgramKindCFF
 	}
-	f := &Face{prog: prog, names: prog.nameToGID(), progData: sfnt, progKind: kind}
+	names := prog.nameToGID()
+	f := &Face{prog: prog, names: names, aglGIDs: aglRuneGIDs(names), progData: sfnt, progKind: kind}
 	f.colr, f.cpal = parseColorTables(sfnt)
 	f.numGlyphs = prog.numGlyphs()
 	f.sbix, f.cbdt = parseBitmapTables(sfnt, f.numGlyphs)

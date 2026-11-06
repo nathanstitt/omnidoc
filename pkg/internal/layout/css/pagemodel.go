@@ -137,6 +137,7 @@ func groupRuns(blocks []*Fragment) []pageRun {
 // no @page rule), so existing geometry is preserved while content is inset by the
 // margins. It never panics (the same page-boundary recover as Layout).
 func (e *Engine) LayoutPagedDoc(ctx context.Context, root *cssbox.Box, cfg PagedConfig) (pages *layout.Pages, err error) {
+	e.setMarginBase(root)
 	if !cfg.Paged {
 		return e.Layout(ctx, root, cfg.FallbackW) // single tall page (handles canvas bg)
 	}
@@ -199,7 +200,8 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 	}
 
 	cbWidth := contentWidth(body, g0.contentW)
-	buckets := bucketBlocks(body.Children, g0.contentH, cbWidth, e.logf)
+	buckets, grown := bucketBlocksGrowing(body.Children, g0.contentH, cbWidth, wrapperDecorationBottom(root, body), e.logf)
+	applySplitGrowth(grown, root.Floats, root, body)
 
 	// Pull page 0's top up to include the wrapper's own top border/background (same as
 	// paginate) so a body top border shows on page 0.
@@ -569,7 +571,7 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 
 	var all []runBucket
 	attributed := map[*Fragment]bool{} // floats routed to some run (for the unattributed-float diagnostic below)
-	for _, r := range runs {
+	for ri, r := range runs {
 		geom, blocks := getLayout(r.name)
 		// Take this run's blocks BY INDEX from the matching-width layout. The cssbox tree
 		// is identical across widths, so body.Children indices align run-for-run.
@@ -578,7 +580,27 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		}
 		runBlocks := blocks[r.start:r.end]
 		cb := contentWidth(bodyFragment(layoutByWidth[geom.contentW]), geom.contentW)
-		bks := bucketBlocks(runBlocks, geom.contentH, cb, e.logf)
+		// Only the document's last run holds the wrapper's bottom edge.
+		wrapperBottom := 0.0
+		if ri == len(runs)-1 {
+			frag := layoutByWidth[geom.contentW]
+			wrapperBottom = wrapperDecorationBottom(frag, bodyFragment(frag))
+		}
+		bks, grown := bucketBlocksGrowing(runBlocks, geom.contentH, cb, wrapperBottom, e.logf)
+		applySplitGrowth(grown, nil, bodyFragment(layoutByWidth[geom.contentW]))
+		// The document's first page also holds the html/body wrapper's top border and
+		// padding, as on the single-geometry path (paginateDoc).
+		if len(all) == 0 && len(bks) > 0 {
+			frag := layoutByWidth[geom.contentW]
+			top := bks[0].top
+			if t := wrapperDecorationTop(frag, top); t < top {
+				top = t
+			}
+			if t := wrapperDecorationTop(bodyFragment(frag), top); t < top {
+				top = t
+			}
+			bks[0].top = top
+		}
 		// Split this run's out-of-flow floats across its buckets (cloned + shifted into
 		// each bucket's local frame). Without this, floats in a named-page section were
 		// dropped entirely (paginateRuns nil'd Floats and never re-attached them).
@@ -594,6 +616,7 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		for _, fl := range ownFloats {
 			attributed[fl] = true
 		}
+		applySplitGrowth(grown, ownFloats)
 		runFloats := floatsForRun(ownFloats, bks)
 		// Split this run's positioned layer (relative blocks re-attached by pointer; page-CB
 		// abs boxes routed to their band + cloned + shifted; fixed boxes cloned onto every
@@ -644,6 +667,16 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		runBody := *bodyFragment(layoutByWidth[g.contentW])
 		runBody.Children = bk.blocks
 		runBody.Positioned, runBody.PositionedInfo, runBody.Floats = nil, nil, nil
+		// Fragment the html/body wrapper's own border and background across pages, as
+		// assemblePages does: move each wrapper box (not its children) into this page's
+		// block-shifted frame, so its top edge shows only on the page holding the
+		// wrapper's top and its bottom edge only on the page holding its bottom. Left at
+		// its document position, the wrapper drew its top rule at the top of every page,
+		// under that page's first line.
+		shiftFragmentSelf(&runBody, -bk.top)
+		shiftFragmentSelf(&pageRoot, -bk.top)
+		sliceWrapperForPage(&runBody, i == len(all)-1, g.contentH)
+		sliceWrapperForPage(&pageRoot, i == len(all)-1, g.contentH)
 		children := make([]*Fragment, len(base.Children))
 		copy(children, base.Children)
 		children[len(children)-1] = &runBody

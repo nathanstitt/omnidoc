@@ -300,6 +300,17 @@ type Glyph struct {
 	// from the line baseline. The shaper does not act on it. Zero for callers that don't
 	// set Run.BaselineShiftPt (e.g. DOCX).
 	BaselineShiftPt float64
+	// BidiRune, when non-zero, is the character whose bidi class a glyph WITHOUT runes
+	// takes in the reorder: the first rune of its shaping cluster. A harfbuzz cluster
+	// attributes its runes to one glyph only, and the others (a dot mark, or a
+	// letter's body when the mark carries the runes) would otherwise reorder as
+	// neutrals and could leave their cluster at the edge of a right-to-left run.
+	BidiRune rune
+	// XShiftPt moves the glyph's paint position right (positive) of its pen, in points,
+	// without moving the pen: a GPOS mark placement (an Arabic dot attached to its
+	// letter). Every horizontal emitter adds it to the glyph's paint X. Zero for every
+	// glyph not shaped by harfbuzz.
+	XShiftPt float64
 	// Face, GID, and Runes carry font identity for text-emitting backends (the PDF
 	// writer embeds Face's program for GID and maps GID -> Runes in /ToUnicode). Face
 	// is nil for whitespace/atomic/break glyphs; a rasterizing backend ignores all
@@ -478,11 +489,11 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 				}
 				seg := runes[ri:end]
 				// The run's own face may not cover the script (a Latin family with an
-				// Arabic phrase in it); fall back to the covering bundled face first, so
-				// shaping runs against the face that actually has the glyphs.
+				// Arabic phrase in it); fall back to a covering face first, so shaping
+				// runs against the face that actually has the glyphs.
 				shapeFace := face
 				if _, _, ok := face.Glyph(rn); !ok {
-					if fb, fbOK := faces.ResolveScriptFallback(rn, style); fbOK {
+					if fb, fbOK := faces.ResolveFallback(rn, r.Family, style); fbOK {
 						shapeFace = fb
 					}
 				}
@@ -509,6 +520,14 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 						// would be a different wrong answer.
 						g.Advance = spacedAdvance(sg.advance*r.SizePt, false)
 						g.Runes = sg.runes
+						// The glyphs of a cluster that carry none of its runes take its
+						// first rune's bidi class, so the reorder keeps the cluster together.
+						g.BidiRune = sg.clusterRune
+						// A mark's GPOS placement moves its ink, not the pen: the x offset
+						// is a per-glyph paint shift and the y offset rides the same shift
+						// as vertical-align. Glyph order and advances stay harfbuzz's.
+						g.XShiftPt = sg.xOffset * r.SizePt
+						g.BaselineShiftPt += sg.yOffset * r.SizePt
 						out = append(out, g)
 						lineCol += g.Advance
 					}
@@ -573,11 +592,12 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 				outline, advEm, ok := face.Glyph(rn)
 				glyphFace := face
 				if !ok {
-					// The run's family has no glyph for this rune. Before dropping it,
-					// try a bundled face that covers its script: each bundled face
-					// covers one script, so Hebrew or Arabic inside an otherwise-Latin
-					// paragraph resolves here rather than vanishing.
-					if fb, fbOK := faces.ResolveScriptFallback(rn, style); fbOK {
+					// The run's face has no glyph for this rune. Before dropping it,
+					// fall back per character: the rest of the font-family list, then
+					// a bundled script face, then the supplied fonts directory, then
+					// installed fallback fonts. So Hebrew, CJK or a symbol inside an
+					// otherwise-Latin paragraph resolves here rather than vanishing.
+					if fb, fbOK := faces.ResolveFallback(rn, r.Family, style); fbOK {
 						if o, a, gOK := fb.Glyph(rn); gOK {
 							outline, advEm, ok, glyphFace = o, a, true, fb
 						} else if gid, adv, cOK := colorGlyphIn(fb, rn); cOK {

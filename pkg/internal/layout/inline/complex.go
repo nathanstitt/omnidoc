@@ -12,11 +12,14 @@ package inline
 // their cluster indices, which is how a many-runes-to-one-glyph ligature or a
 // one-rune-to-many-glyphs decomposition is attributed back to the source text.
 //
-// DIRECTION: shaping is forced LEFT-TO-RIGHT even for right-to-left script. Harfbuzz
-// would otherwise emit visual order itself, which would then be reordered a second
-// time by the UAX#9 L2 pass in MakeVisualLine and come out backwards. Forcing LTR
-// keeps the whole pipeline in logical order right up to that single reorder — the
-// contextual forms are applied either way, only the output order differs.
+// DIRECTION: every script routed here (Arabic, Syriac, Thaana) is right-to-left, and
+// it is shaped RIGHT-TO-LEFT. Harfbuzz's Arabic shaper picks each letter's joining
+// form from its neighbours in the direction it is told; shaped left-to-right it
+// joined words backwards (in مرحبا, meem and alef came out isolated and beh
+// initial). Harfbuzz returns right-to-left output in visual order, so shapeComplex
+// reverses it back to logical order: the rest of the pipeline stays logical up to
+// the single UAX#9 L2 reorder in MakeVisualLine, which reverses the segment again and
+// so draws exactly the visual order harfbuzz produced.
 
 import (
 	"github.com/benoitkugler/textlayout/harfbuzz"
@@ -51,6 +54,14 @@ type shapedGlyph struct {
 	gid     uint16
 	advance float64 // em units (advance / upem)
 	runes   []rune  // the source runes of this glyph's cluster; may be several or none
+	// clusterRune is the first source rune of the glyph's cluster. A glyph that carries
+	// no runes (a mark, when its base carries them) uses it as its bidi class, so the
+	// reorder keeps it in its cluster's directional run.
+	clusterRune rune
+	// xOffset and yOffset are harfbuzz's GPOS placement in em units (y positive up):
+	// where the glyph is drawn relative to its pen, without moving the pen. Mark
+	// attachment uses them to put an Arabic dot under or over its letter.
+	xOffset, yOffset float64
 }
 
 // shapeComplex shapes text through harfbuzz using face's OpenType layout tables, in
@@ -74,9 +85,9 @@ func shapeComplex(face *pkgfont.Face, text []rune) ([]shapedGlyph, bool) {
 	buf := harfbuzz.NewBuffer()
 	buf.AddRunes(text, 0, -1)
 	buf.GuessSegmentProperties()
-	// Force logical order; see the DIRECTION note at the top of the file. The script
-	// and language harfbuzz guessed are kept — those select the shaping engine.
-	buf.Props.Direction = harfbuzz.LeftToRight
+	// See the DIRECTION note at the top of the file. The script and language harfbuzz
+	// guessed are kept — those select the shaping engine.
+	buf.Props.Direction = harfbuzz.RightToLeft
 	buf.Shape(hbFont, nil)
 	if len(buf.Info) == 0 {
 		return nil, false
@@ -89,12 +100,29 @@ func shapeComplex(face *pkgfont.Face, text []rune) ([]shapedGlyph, bool) {
 	out := make([]shapedGlyph, 0, len(buf.Info))
 	for i, info := range buf.Info {
 		out = append(out, shapedGlyph{
-			gid:     uint16(info.Glyph),
-			advance: float64(buf.Pos[i].XAdvance) / upem,
-			runes:   clusterRunes(buf.Info, text, i),
+			gid:         uint16(info.Glyph),
+			advance:     float64(buf.Pos[i].XAdvance) / upem,
+			runes:       clusterRunes(buf.Info, text, i),
+			clusterRune: clusterFirstRune(buf.Info, text, i),
+			xOffset:     float64(buf.Pos[i].XOffset) / upem,
+			yOffset:     float64(buf.Pos[i].YOffset) / upem,
 		})
 	}
+	// Harfbuzz's right-to-left output is in visual order; hand the pipeline logical
+	// order (see the DIRECTION note).
+	for i, j := 0, len(out)-1; i < j; i, j = i+1, j-1 {
+		out[i], out[j] = out[j], out[i]
+	}
 	return out, true
+}
+
+// clusterFirstRune returns the first source rune of glyph i's cluster, or 0 when the
+// cluster index falls outside the text.
+func clusterFirstRune(infos []harfbuzz.GlyphInfo, text []rune, i int) rune {
+	if c := int(infos[i].Cluster); c >= 0 && c < len(text) {
+		return text[c]
+	}
+	return 0
 }
 
 // clusterRunes returns the source runes glyph i stands for.

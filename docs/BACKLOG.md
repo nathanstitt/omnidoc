@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**31 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
+**39 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -80,6 +80,10 @@ trusting any entry that has aged** — grep for the claimed symptom first.
 - ☐ **F8. A rowspan cell whose *spanned-into* row grows from baseline does not re-grow.** *Deferred
   (localized).* Needs the cross-row baseline re-solve the table design deliberately avoids. Documented in
   `table.go`. Low value, high complexity. (Same issue as I6.)
+- ☐ **F9. Repeat `<tfoot>` on every page a table spans.** *Medium.* Only `<thead>` repeats: a
+  `table-footer-group` is laid out once, at the end of the table. Needs a `FooterTop` on the table
+  fragment like `HeaderBottom` (`fragment.go`) and a reservation for the footer rows in
+  `splitTableForPage` (`tablepage.go`).
 
 ## HTML/CSS — web fonts
 
@@ -99,6 +103,29 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   (platform-specific).
 - ☐ **G6. Content-addressed fetch cache.** *Small (perf).* `FaceCache` is keyed `(family, style)`
   (`faceKey`, `cache.go`), so one file is fetched per style.
+- ☐ **G7. Font collections in `WithFallbackFontDir`.** *Medium.* The fallback directory skips `.ttc`/`.otc`
+  files with a log (`dirFallbackFaces`, `cache.go`). Serving each face of a collection needs a
+  face-index API in the parser (`parseTrueTypeOrCollection` and `firstFaceOf` read only the first face)
+  and collection-face embedding in the PDF writer (`LoadSFNT` keeps the raw collection bytes, which are
+  not a standalone embeddable sfnt).
+- ☐ **G8. Fallback directory loads under the cache lock.** *Small (perf).* On the first glyph miss,
+  `dirFallbackFaces` reads and parses every file in the directory while holding `FaceCache.mu`, so other
+  `Resolve`/`ResolveFallback` calls on that cache block while large CJK files load. Candidates: parse
+  each file lazily, only when the earlier files lack the glyph, or load outside the lock.
+- ☐ **G9. Fallback directory is parsed once per document.** *Small (perf).* Each document's
+  `FaceCache` parses the `WithFallbackFontDir` fonts again on its first glyph miss
+  (`dirFallbackFaces`, `cache.go`). A server that renders many documents with CJK text would gain
+  from a process-wide cache of parsed faces, keyed by path and modification time.
+- ☐ **G10. Bundled Greek/Cyrillic covers WGL4 only.** *Small.* `standard.Fallback` sends all of
+  U+0370-03FF and U+0400-04FF to the bundled Go fonts, but those fonts cover the WGL4 repertoire,
+  not the full blocks: a 2026-11-06 probe found 158 of the 256 Cyrillic code points missing (from
+  U+0460 on, the historic letters and the letters of non-Russian languages). A missing letter goes
+  on to the fallback directory and the installed fonts; in bundled mode with no directory it is
+  drawn as `.notdef` with a log. Needs a wider OFL face.
+- ☐ **G11. GPOS mark placement in CSS vertical writing modes.** *Small.* The CSS vertical line
+  emitter (`inline.go`, the `penY` path) does not add a glyph's `XShiftPt`/`BaselineShiftPt`, so a
+  sideways Arabic glyph in `writing-mode: vertical-*` loses its harfbuzz mark placement (the dot sits
+  at its base's pen). Horizontal CSS lines, margin boxes and SVG text apply it.
 
 ## HTML/CSS — grid
 
@@ -177,3 +204,11 @@ trusting any entry that has aged** — grep for the claimed symptom first.
     `flex-grow`/`stretch`/`fr` size items collectively and would have to be re-solved per fragmentainer.
     Already an owner-signed deferral, and the case with the least real-world demand.
 - ☐ **N4. Per-page float distribution.** *Medium.*
+- ☐ **N7. `@page`-level declarations on margin boxes.** *Small.* Margin boxes inherit the root
+  element's font and color (`marginBaseFrom`, `marginbox.go`), but a font or color declared on
+  `@page` itself is not applied: `UsedPage` does not carry those declarations.
+- ☐ **N8. `break-*: avoid` between nested blocks, and keep-with-next for headings.** *Medium.* The
+  avoid keep (`breakAvoidBetween`, `paginate.go`) runs only between top-level blocks; a block split
+  at a child boundary (`splitMixedBlock`, `fragmentpage.go`) ignores it, and the UA sheet (`html/ua.go`) sets
+  no `break-after: avoid` on `h1`–`h6`. So a heading inside a section can end a page alone (showcase
+  §38 "The block control"). Needs the avoid chain in the mixed-block splitter and a heading default.

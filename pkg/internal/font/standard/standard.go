@@ -45,6 +45,11 @@ package standard
 import (
 	_ "embed"
 	"strings"
+
+	"golang.org/x/image/font/gofont/gobold"
+	"golang.org/x/image/font/gofont/gobolditalic"
+	"golang.org/x/image/font/gofont/goitalic"
+	"golang.org/x/image/font/gofont/goregular"
 )
 
 //go:embed fonts/NotoSansHebrew-Regular.ttf
@@ -173,11 +178,21 @@ var (
 		italic:     Substitute{Name: "NotoNaskhArabic-Regular", Data: notoArabicTTF, Kind: KindTrueType},
 		boldItalic: Substitute{Name: "NotoNaskhArabic-Regular", Data: notoArabicTTF, Kind: KindTrueType},
 	}
+	// greekCyrillic covers Greek and Cyrillic, which the TeX Gyre substitutes
+	// cover only in part (accented Greek is missing) or not at all (Cyrillic).
+	// The Go fonts carry the WGL4 set in four styles under a BSD licence and
+	// already ship in golang.org/x/image, so they add no download.
+	greekCyrillic = family{
+		regular:    Substitute{Name: "Go-Regular", Data: goregular.TTF, Kind: KindTrueType},
+		bold:       Substitute{Name: "Go-Bold", Data: gobold.TTF, Kind: KindTrueType},
+		italic:     Substitute{Name: "Go-Italic", Data: goitalic.TTF, Kind: KindTrueType},
+		boldItalic: Substitute{Name: "Go-BoldItalic", Data: gobolditalic.TTF, Kind: KindTrueType},
+	}
 )
 
 // ScriptFallback returns the bundled face that covers r, for a rune the requested
-// family cannot map. It resolves ONLY the right-to-left scripts that no Latin
-// substitute covers; every other rune returns ok=false so the caller keeps its
+// family cannot map. It resolves Hebrew, Arabic, Greek and Cyrillic, which no Latin
+// substitute covers fully; every other rune returns ok=false so the caller keeps its
 // existing behavior (skip the rune and log).
 //
 // This is a per-RUNE lookup on purpose. A paragraph is one styled run with one
@@ -194,6 +209,9 @@ func ScriptFallback(r rune, bold, italic bool) (Substitute, bool) {
 		r >= 0xFB50 && r <= 0xFDFF, // Arabic presentation forms A
 		r >= 0xFE70 && r <= 0xFEFF: // Arabic presentation forms B
 		return arabic.pick(bold, italic), true
+	case r >= 0x0370 && r <= 0x03FF, // Greek and Coptic
+		r >= 0x0400 && r <= 0x04FF: // Cyrillic
+		return greekCyrillic.pick(bold, italic), true
 	}
 	return Substitute{}, false
 }

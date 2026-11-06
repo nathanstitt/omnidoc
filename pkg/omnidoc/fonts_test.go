@@ -2,9 +2,15 @@ package omnidoc
 
 import (
 	"bytes"
+	"context"
+	"fmt"
+	"image"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"golang.org/x/image/font/gofont/gobold"
 )
 
 // The public font seams must be nameable and implementable from outside this
@@ -72,5 +78,107 @@ func TestDirFontProvider(t *testing.T) {
 	}
 	if _, ok := (DirFontProvider{}).LoadStyled("Foo", false, false); ok {
 		t.Error("zero-value DirFontProvider must never match")
+	}
+}
+
+// Names in Greek, Cyrillic, Hebrew and accented Latin print with the bundled
+// fonts alone: no rune reaches the .notdef path.
+func TestBundledFontsPrintGreekCyrillicHebrewAndAccentedLatin(t *testing.T) {
+	var logs []string
+	src := `<!doctype html><html style="font-family: sans-serif"><body>` +
+		`<p>Zoë Ñandú Łódź</p><p>Ελληνικά ά</p><p>Москва Київ</p><p>שלום</p></body></html>`
+	doc, err := OpenHTMLBytes([]byte(src), WithDefaultPaged(), WithBundledFonts(),
+		WithLogf(func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	var pdf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	for _, l := range logs {
+		if strings.Contains(l, "no glyph for") {
+			t.Errorf("missing glyph: %s", l)
+		}
+	}
+	// Positive check: the PDF reopens and its text layer gives the words back,
+	// so each glyph was embedded with its /ToUnicode mapping.
+	reopened, err := OpenBytes(pdf.Bytes())
+	if err != nil {
+		t.Fatalf("reopen the PDF: %v", err)
+	}
+	var text bytes.Buffer
+	if err := reopened.WriteText(context.Background(), &text, MarkdownOptions{}); err != nil {
+		t.Fatalf("extract text: %v", err)
+	}
+	for _, word := range []string{"Zoë", "Ñandú", "Łódź", "Ελληνικά", "Москва", "Київ"} {
+		if !strings.Contains(text.String(), word) {
+			t.Errorf("the PDF text lacks %q; got %q", word, text.String())
+		}
+	}
+}
+
+// Through the public API, in hermetic bundled mode: box-drawing characters the
+// bundle lacks draw as .notdef without a fonts directory, and from the
+// directory's font with one.
+func TestWithFallbackFontDirCoversWhatTheBundleLacks(t *testing.T) {
+	src := []byte(`<!doctype html><html style="font-family: sans-serif"><body><p>Box ─░▲</p></body></html>`)
+	missing := func(opts ...HTMLOption) int {
+		var n int
+		opts = append(opts, WithDefaultPaged(), WithBundledFonts(), WithLogf(func(f string, a ...any) {
+			if strings.Contains(fmt.Sprintf(f, a...), "no glyph for") {
+				n++
+			}
+		}))
+		doc, err := OpenHTMLBytes(src, opts...)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		var pdf bytes.Buffer
+		if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		return n
+	}
+	if missing() == 0 {
+		t.Fatal("precondition: the bundle already covers ─░▲, pick other characters")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Extra.ttf"), gobold.TTF, 0o644); err != nil {
+		t.Fatalf("write font: %v", err)
+	}
+	if n := missing(WithFallbackFontDir(dir)); n != 0 {
+		t.Errorf("%d characters still missing with the fonts directory", n)
+	}
+}
+
+// Arabic written to PDF draws what the direct raster draws: the same joined letters
+// and the same dots (mark glyphs, positioned by harfbuzz) — the PDF path places
+// glyphs by GID from the same layout, so the two rasters must agree.
+func TestArabicPDFMatchesDirectRaster(t *testing.T) {
+	src := `<!doctype html><html><head><style>@page { size: 400px 200px; margin: 20px }</style></head>` +
+		`<body style="font-size: 40px"><p dir="rtl">مرحبا عليكم</p></body></html>`
+	doc, err := OpenHTMLBytes([]byte(src), WithDefaultPaged(), WithBundledFonts())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	direct, err := doc.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI, BundledFonts: true})
+	if err != nil {
+		t.Fatalf("direct raster: %v", err)
+	}
+	var pdf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	back, err := OpenBytes(pdf.Bytes())
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	viaPDF, err := back.RasterizePage(context.Background(), 0, RasterOptions{DPI: goldenDPI, BundledFonts: true})
+	if err != nil {
+		t.Fatalf("PDF raster: %v", err)
+	}
+	if diff, n := compareImages(direct.(*image.RGBA), viaPDF.(*image.RGBA)); diff {
+		t.Errorf("the PDF raster differs from the direct raster in %d pixels", n)
 	}
 }

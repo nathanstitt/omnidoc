@@ -1,10 +1,13 @@
 package omnidoc
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -96,5 +99,65 @@ func TestWithDefaultPagedNoAtPageFallsBackToLetter(t *testing.T) {
 	if math.Abs(pg.WidthPt-LetterWidthPt) > 0.5 || math.Abs(pg.HeightPt-LetterHeightPt) > 0.5 {
 		t.Errorf("page size = %.0f x %.0f, want Letter %d x %d (fallback)",
 			pg.WidthPt, pg.HeightPt, LetterWidthPt, LetterHeightPt)
+	}
+}
+
+// CSS Paged Media: the page context inherits from the root element, so a
+// footer takes the document's font. With html { font-family: sans-serif } the
+// PDF must embed only the sans face; a serif footer would add TeX Gyre Termes.
+func TestMarginBoxInheritsTheRootFont(t *testing.T) {
+	src := `<!doctype html><html style="font-family: sans-serif"><head><style>
+		@page { size: Letter; margin: 0.5in; @bottom-right { content: "Page " counter(page) " of " counter(pages) } }
+	</style></head><body><p>Body text</p></body></html>`
+	doc, err := OpenHTMLBytes([]byte(src), WithDefaultPaged(), WithBundledFonts())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	var pdf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	// The embedded font programs are Flate streams, and every font is named
+	// "Embedded" in its dictionaries, so the face names are only readable in the
+	// decoded programs. (Matching the raw bytes passed only where the compressor
+	// happened to store the program's cleartext header uncompressed.)
+	programs := pdfStreams(t, pdf.Bytes())
+	if !strings.Contains(programs, "TeXGyreHeros") {
+		t.Fatal("the sans face is not embedded")
+	}
+	if strings.Contains(programs, "TeXGyreTermes") {
+		t.Error("the footer used the serif face, not the root's sans-serif")
+	}
+}
+
+// A block that starts with a forced break and is taller than a page must still
+// split across pages. The forced break only closes the page before it; it must
+// not stop the block from fragmenting, or everything below the first page
+// overflows the page box and is clipped.
+func TestForcedBreakBlockTallerThanAPageSplits(t *testing.T) {
+	var paras strings.Builder
+	for i := 1; i <= 60; i++ {
+		fmt.Fprintf(&paras, "<p>Paragraph %d</p>", i)
+	}
+	pages := func(lead, sectionStyle string) int {
+		src := `<!doctype html><html><head><style>@page { size: Letter; margin: 0.5in }</style></head><body>` +
+			lead + `<section style="` + sectionStyle + `">` + paras.String() + `</section></body></html>`
+		doc, err := OpenHTMLBytes([]byte(src), WithDefaultPaged(), WithBundledFonts())
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		return doc.PageCount()
+	}
+	unforced := pages("", "")
+	if unforced < 2 {
+		t.Fatalf("precondition: the section must be taller than a page, got %d page(s)", unforced)
+	}
+	// A forced break on the first block is a no-op, so the page count must match.
+	if got := pages("", "break-before: page"); got != unforced {
+		t.Errorf("forced-break first section: %d pages, want %d (the block did not split)", got, unforced)
+	}
+	// After a lead paragraph the break adds exactly the lead's page.
+	if got := pages("<p>Lead</p>", "break-before: page"); got != unforced+1 {
+		t.Errorf("forced-break section after a lead: %d pages, want %d (the block did not split)", got, unforced+1)
 	}
 }

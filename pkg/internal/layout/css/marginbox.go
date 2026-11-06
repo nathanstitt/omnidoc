@@ -51,7 +51,7 @@ func (e *Engine) appendMarginBoxes(items []layout.Item, g pageGeom, pageIndex, p
 		if text == "" {
 			continue
 		}
-		cs := gcss.Stylesheet{}.ComputeMarginBox(mb.Decls, marginBoxBaseStyle())
+		cs := gcss.Stylesheet{}.ComputeMarginBox(mb.Decls, e.marginStyle())
 		run := inline.Run{Text: text, Family: cs.FontFamily, Bold: cs.Bold, Italic: cs.Italic, SizePt: cs.FontSizePt, Color: cs.Color}
 		glyphs := inline.Shape(e.faces, []inline.Run{run}, e.logf)
 		w := 0.0
@@ -332,11 +332,11 @@ func edgeTriple(slot gcss.MarginBoxSlot) (lead, center, trail gcss.MarginBoxSlot
 // appendMarginText lays out text on a single line within rect r (the margin box),
 // aligned per the box's text-align, vertically centered in the band, and appends its
 // glyphs to items. The text styling (font-family/size, color, text-align) is resolved by
-// running the box's declarations through the CSS cascade over a default base (serif,
-// 11pt, black) — so a margin box styled `font: bold 9pt sans-serif; color: gray` renders
-// accordingly.
+// running the box's declarations through the CSS cascade over the root element's font
+// and color (marginStyle) — so a margin box styled `font: bold 9pt sans-serif; color:
+// gray` renders accordingly, and an unstyled one takes the document's font.
 func (e *Engine) appendMarginText(items []layout.Item, text string, decls []gcss.Declaration, r marginRect) []layout.Item {
-	cs := gcss.Stylesheet{}.ComputeMarginBox(decls, marginBoxBaseStyle())
+	cs := gcss.Stylesheet{}.ComputeMarginBox(decls, e.marginStyle())
 	run := inline.Run{
 		Text:   text,
 		Family: cs.FontFamily,
@@ -365,7 +365,7 @@ func (e *Engine) appendMarginText(items []layout.Item, text string, decls []gcss
 			items = append(items, layout.Item{
 				Kind: layout.GlyphKind,
 				Glyph: layout.GlyphItem{
-					Outline: g.Outline, XPt: x, YPt: baselineY, SizePt: g.SizePt,
+					Outline: g.Outline, XPt: x + g.XShiftPt, YPt: baselineY - g.BaselineShiftPt, SizePt: g.SizePt,
 					Color: color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
 					Face:  g.Face, GID: g.GID, Runes: g.Runes,
 				},
@@ -379,10 +379,9 @@ func (e *Engine) appendMarginText(items []layout.Item, text string, decls []gcss
 	return items
 }
 
-// marginBoxBaseStyle is the default style a margin box's declarations cascade over: the
-// serif body font at 11pt, black, left-aligned. (Full inheritance from the page context
-// — a footer in the document's font — is a refinement; the explicit defaults match a
-// browser's UA margin-box rendering closely enough for running headers/footers.)
+// marginBoxBaseStyle is the UA default a margin box falls back to when the root element
+// sets no font: the serif body font at 11pt, black, left-aligned. marginBaseFrom layers
+// the root element's font and color over it.
 func marginBoxBaseStyle() gcss.ComputedStyle {
 	return gcss.ComputedStyle{
 		FontFamily: "serif",
@@ -390,6 +389,45 @@ func marginBoxBaseStyle() gcss.ComputedStyle {
 		Color:      color.RGBA{0, 0, 0, 255},
 		TextAlign:  "left",
 	}
+}
+
+// marginBaseFrom is the style a margin box inherits. CSS Paged Media puts the
+// page context under the root element, so a footer takes the document's font,
+// size and color unless its own declarations set them. A field the root leaves
+// unset (empty family, zero size, transparent color) keeps the fallback (serif,
+// 11pt, black). @page-level declarations are not applied: UsedPage does not
+// carry them.
+func marginBaseFrom(root gcss.ComputedStyle) gcss.ComputedStyle {
+	base := marginBoxBaseStyle()
+	if root.FontFamily != "" {
+		base.FontFamily = root.FontFamily
+	}
+	if root.FontSizePt > 0 {
+		base.FontSizePt = root.FontSizePt
+	}
+	base.Bold, base.Italic = root.Bold, root.Italic
+	if root.Color.A != 0 {
+		base.Color = root.Color
+	}
+	return base
+}
+
+// setMarginBase records the root element's inherited style for this layout's margin
+// boxes. It resets on every paged layout so an Engine reused for another document
+// never carries the previous root's font.
+func (e *Engine) setMarginBase(root *cssbox.Box) {
+	e.marginBase = gcss.ComputedStyle{}
+	if root != nil {
+		e.marginBase = marginBaseFrom(root.Style)
+	}
+}
+
+// marginStyle is the base a margin box's declarations cascade over.
+func (e *Engine) marginStyle() gcss.ComputedStyle {
+	if e.marginBase.FontFamily == "" {
+		return marginBoxBaseStyle()
+	}
+	return e.marginBase
 }
 
 // alignOf maps a CSS text-align value to the inline core's Align for a page margin

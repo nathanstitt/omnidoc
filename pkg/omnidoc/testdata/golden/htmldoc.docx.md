@@ -1237,3 +1237,90 @@ wider than its container
 When the box is _wider_ than the space it sits in, the leftover is negative. A naïve half‑split would give each margin a negative value and drag the box off the left edge of the page; the spec instead treats the auto margin as zero, so the box starts at the left and overflows to the right — what every browser does. The clamp is a one‑line floor, and the test that pins it is the reason it is not a one‑line bug.
 
 Vertical auto margins are untouched: in normal flow they compute to zero (CSS §10.6.3), and vertical centering with `auto` is a flex/grid feature that those paths resolve themselves. Only the horizontal axis is handled here.
+
+**45 / FONT FALLBACK**
+
+## Per-character font fallback
+
+A face that lacks a character no longer draws a box or a wrong glyph. Each character is checked against the faces in the `font-family` list, then the bundled scripts, then a fonts directory the caller supplies, then installed fonts — the first face that has the glyph draws it.
+
+#### Accented Latin
+
+Zoë Brontë · Ñandú · Łódź · Čeština · Ångström · Øresund · Ősz
+
+The bundled TeX Gyre faces map accented code points to small‑cap alternates in their own cmap, so “Zoë” once printed with a small‑cap “e”. A glyph is now found by its plain Adobe Glyph List name first (`edieresis`, not `edieresis.sc`).
+
+#### Greek and Cyrillic
+
+Ελληνικά · Αθήνα · Θεσσαλονίκη
+
+Москва · Київ · Беларусь · Србија
+
+The Latin faces have no Greek or Cyrillic letters (or only part of the Greek). These words come from the bundled Go fonts, which cover the WGL4 repertoire; a letter outside it goes on to the caller’s fonts directory and then installed fonts.
+
+#### Mixed in one line
+
+Invoice for Zoë Ivanova (Иванова), Αθήνα — €1.250,00
+
+One run of text can mix scripts: the fallback is per character, so the Latin letters stay in the requested face and only the letters it lacks change face.
+
+**46 / REPEATED TABLE HEADERS**
+
+## A table header on every page
+
+A table that spans pages repeats its `<thead>` at the top of each continuation page, also when the table starts part‑way down a page and has a caption, as this one does. The caption stays with the first part; the collapsed grid lines carry on across the break; and the text after the table starts below its last row.
+
+**Open invoices**
+
+| Invoice | Region | Days | Amount |
+| --- | --- | --- | --- |
+| INV-1001 | South | 47 | $2,237.00 |
+| INV-1002 | East | 84 | $3,474.00 |
+| INV-1003 | West | 31 | $4,711.00 |
+| INV-1004 | North | 68 | $5,948.00 |
+| INV-1005 | South | 15 | $7,185.00 |
+| INV-1006 | East | 52 | $8,422.00 |
+| INV-1007 | West | 89 | $9,659.00 |
+| INV-1008 | North | 36 | $1,896.00 |
+| INV-1009 | South | 73 | $3,133.00 |
+| INV-1010 | East | 20 | $4,370.00 |
+| INV-1011 | West | 57 | $5,607.00 |
+| INV-1012 | North | 94 | $6,844.00 |
+| INV-1013 | South | 41 | $8,081.00 |
+| INV-1014 | East | 78 | $9,318.00 |
+| INV-1015 | West | 25 | $1,555.00 |
+| INV-1016 | North | 62 | $2,792.00 |
+| INV-1017 | South | 99 | $4,029.00 |
+| INV-1018 | East | 46 | $5,266.00 |
+| INV-1019 | West | 83 | $6,503.00 |
+| INV-1020 | North | 30 | $7,740.00 |
+| INV-1021 | South | 67 | $8,977.00 |
+| INV-1022 | East | 14 | $1,214.00 |
+| INV-1023 | West | 51 | $2,451.00 |
+| INV-1024 | North | 88 | $3,688.00 |
+| INV-1025 | South | 35 | $4,925.00 |
+| INV-1026 | East | 72 | $6,162.00 |
+| INV-1027 | West | 19 | $7,399.00 |
+| INV-1028 | North | 56 | $8,636.00 |
+| INV-1029 | South | 93 | $9,873.00 |
+| INV-1030 | East | 40 | $2,110.00 |
+| INV-1031 | West | 77 | $3,347.00 |
+| INV-1032 | North | 24 | $4,584.00 |
+| INV-1033 | South | 61 | $5,821.00 |
+| INV-1034 | East | 98 | $7,058.00 |
+| INV-1035 | West | 45 | $8,295.00 |
+| INV-1036 | North | 82 | $9,532.00 |
+| INV-1037 | South | 29 | $1,769.00 |
+| INV-1038 | East | 66 | $3,006.00 |
+| INV-1039 | West | 13 | $4,243.00 |
+| INV-1040 | North | 50 | $5,480.00 |
+| INV-1041 | South | 87 | $6,717.00 |
+| INV-1042 | East | 34 | $7,954.00 |
+| INV-1043 | West | 71 | $9,191.00 |
+| INV-1044 | North | 18 | $1,428.00 |
+| INV-1045 | South | 55 | $2,665.00 |
+| INV-1046 | East | 92 | $3,902.00 |
+| INV-1047 | West | 39 | $5,139.00 |
+| INV-1048 | North | 76 | $6,376.00 |
+
+Each repeated header makes the continuation taller, and that growth moves everything after the table down with it — without it this paragraph was drawn over the last rows. `<tfoot>` is still drawn once, at the end of the table.

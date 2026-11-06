@@ -232,7 +232,7 @@ func (e *Engine) layoutInline(ctx context.Context, b *cssbox.Box, contentW, cont
 			// alone drops emoji entirely.
 			case g.Outline != nil || hasColorInk(g) || g.InlineBox.Paints() || g.Edge != inline.EdgeNone:
 				emitted = append(emitted, GlyphFragment{
-					Outline: g.Outline, X: x, AdvancePt: g.Advance, SizePt: g.SizePt,
+					Outline: g.Outline, X: x + g.XShiftPt, AdvancePt: g.Advance, SizePt: g.SizePt,
 					Color:           color.RGBA{R: g.Color.R, G: g.Color.G, B: g.Color.B, A: g.Color.A},
 					Underline:       g.Underline,
 					Strike:          g.Strike,
