@@ -117,10 +117,15 @@ func TestMarginBoxInheritsTheRootFont(t *testing.T) {
 	if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if !bytes.Contains(pdf.Bytes(), []byte("TeXGyreHeros")) {
+	// The embedded font programs are Flate streams, and every font is named
+	// "Embedded" in its dictionaries, so the face names are only readable in the
+	// decoded programs. (Matching the raw bytes passed only where the compressor
+	// happened to store the program's cleartext header uncompressed.)
+	programs := pdfStreams(t, pdf.Bytes())
+	if !strings.Contains(programs, "TeXGyreHeros") {
 		t.Fatal("the sans face is not embedded")
 	}
-	if bytes.Contains(pdf.Bytes(), []byte("TeXGyreTermes")) {
+	if strings.Contains(programs, "TeXGyreTermes") {
 		t.Error("the footer used the serif face, not the root's sans-serif")
 	}
 }
