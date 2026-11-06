@@ -581,6 +581,20 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		runBlocks := blocks[r.start:r.end]
 		cb := contentWidth(bodyFragment(layoutByWidth[geom.contentW]), geom.contentW)
 		bks, grown := bucketBlocksGrowing(runBlocks, geom.contentH, cb, e.logf)
+		applySplitGrowth(grown, nil, bodyFragment(layoutByWidth[geom.contentW]))
+		// The document's first page also holds the html/body wrapper's top border and
+		// padding, as on the single-geometry path (paginateDoc).
+		if len(all) == 0 && len(bks) > 0 {
+			frag := layoutByWidth[geom.contentW]
+			top := bks[0].top
+			if t := wrapperDecorationTop(frag, top); t < top {
+				top = t
+			}
+			if t := wrapperDecorationTop(bodyFragment(frag), top); t < top {
+				top = t
+			}
+			bks[0].top = top
+		}
 		// Split this run's out-of-flow floats across its buckets (cloned + shifted into
 		// each bucket's local frame). Without this, floats in a named-page section were
 		// dropped entirely (paginateRuns nil'd Floats and never re-attached them).
@@ -647,6 +661,16 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		runBody := *bodyFragment(layoutByWidth[g.contentW])
 		runBody.Children = bk.blocks
 		runBody.Positioned, runBody.PositionedInfo, runBody.Floats = nil, nil, nil
+		// Fragment the html/body wrapper's own border and background across pages, as
+		// assemblePages does: move each wrapper box (not its children) into this page's
+		// block-shifted frame, so its top edge shows only on the page holding the
+		// wrapper's top and its bottom edge only on the page holding its bottom. Left at
+		// its document position, the wrapper drew its top rule at the top of every page,
+		// under that page's first line.
+		shiftFragmentSelf(&runBody, -bk.top)
+		shiftFragmentSelf(&pageRoot, -bk.top)
+		sliceWrapperForPage(&runBody, i == len(all)-1, g.contentH)
+		sliceWrapperForPage(&pageRoot, i == len(all)-1, g.contentH)
 		children := make([]*Fragment, len(base.Children))
 		copy(children, base.Children)
 		children[len(children)-1] = &runBody

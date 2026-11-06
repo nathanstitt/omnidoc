@@ -167,6 +167,8 @@ func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPa
 		// byte-identical for them.)
 		shiftFragmentSelf(&pageBody, -bk.top)
 		shiftFragmentSelf(&pageRoot, -bk.top)
+		sliceWrapperForPage(&pageBody, i == len(buckets)-1, g.contentH)
+		sliceWrapperForPage(&pageRoot, i == len(buckets)-1, g.contentH)
 		// Replace the body entry (root.Children[last]) with the body clone, preserving
 		// any non-body children.
 		children := make([]*Fragment, len(root.Children))
@@ -204,6 +206,23 @@ func (e *Engine) assemblePages(root, body *Fragment, buckets []pageBucket, perPa
 		pages = append(pages, pg)
 	}
 	return pages
+}
+
+// sliceWrapperForPage finishes a page's clone of the html/body wrapper, already moved
+// into the page's block-shifted frame. The wrapper is one box that runs from the first
+// page to the last, so on every page but the last it continues past the page: its
+// bottom edge is not drawn there, and its box reaches at least the bottom of the
+// page's content area. Without this, a forced page break (which leaves blank space the
+// wrapper's flow height never counted) put the wrapper's bottom edge on the page
+// before the last, with its side edges stopping short.
+func sliceWrapperForPage(w *Fragment, lastPage bool, contentH float64) {
+	if lastPage {
+		return
+	}
+	w.Border[layout.EdgeBottom] = BorderEdge{}
+	if w.Y+w.H < contentH {
+		w.H = contentH - w.Y
+	}
 }
 
 // pageBucket is one page's worth of top-level block fragments plus the page-space Y

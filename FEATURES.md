@@ -256,7 +256,10 @@ bullet's design rationale is in its PR:
   fragmentation; running headers and footers with page counters; `@page marks`/`bleed`;
   `string-set`/`string()`; `position: running()`/`content: element()`; and named-page multi-width
   reflow. Margin boxes inherit font family, size, weight, style and color from the root element;
-  their own declarations override. `@page`-level font declarations are not applied.
+  their own declarations override. `@page`-level font declarations are not applied. The html/body
+  wrapper's border and background are one box sliced across pages on both the single-geometry and
+  the named-page paths: the top edge (with the wrapper's top padding) on the first page only, the
+  bottom edge on the last page only, and on every other page the box runs to the content bottom.
 - **`white-space`** (`pkg/internal/css` + `pkg/internal/layout/inline`): normal/nowrap/pre/pre-wrap/pre-line, plus tab
   stops.
 - **`overflow-wrap` / `word-break` — mid-word line breaking** (`pkg/internal/css/cascade.go`,
