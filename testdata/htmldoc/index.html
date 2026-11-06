@@ -2027,5 +2027,76 @@ newline is kept.</p>
       letters it lacks change face.</p>
   </section>
 
+  <section class="section break">
+    <span class="kicker">46 / REPEATED TABLE HEADERS</span>
+    <h2>A table header on every page</h2>
+    <p class="lede">A table that spans pages repeats its <code>&lt;thead&gt;</code> at
+      the top of each continuation page, also when the table starts part&#8209;way
+      down a page and has a caption, as this one does. The caption stays with the
+      first part; the collapsed grid lines carry on across the break; and the text
+      after the table starts below its last row.</p>
+
+    <table class="ledger">
+      <caption>Open invoices</caption>
+      <thead>
+        <tr><th>Invoice</th><th>Region</th><th>Days</th><th>Amount</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>INV-1001</td><td>South</td><td>47</td><td>$2,237.00</td></tr>
+        <tr><td>INV-1002</td><td>East</td><td>84</td><td>$3,474.00</td></tr>
+        <tr><td>INV-1003</td><td>West</td><td>31</td><td>$4,711.00</td></tr>
+        <tr><td>INV-1004</td><td>North</td><td>68</td><td>$5,948.00</td></tr>
+        <tr><td>INV-1005</td><td>South</td><td>15</td><td>$7,185.00</td></tr>
+        <tr><td>INV-1006</td><td>East</td><td>52</td><td>$8,422.00</td></tr>
+        <tr><td>INV-1007</td><td>West</td><td>89</td><td>$9,659.00</td></tr>
+        <tr><td>INV-1008</td><td>North</td><td>36</td><td>$1,896.00</td></tr>
+        <tr><td>INV-1009</td><td>South</td><td>73</td><td>$3,133.00</td></tr>
+        <tr><td>INV-1010</td><td>East</td><td>20</td><td>$4,370.00</td></tr>
+        <tr><td>INV-1011</td><td>West</td><td>57</td><td>$5,607.00</td></tr>
+        <tr><td>INV-1012</td><td>North</td><td>94</td><td>$6,844.00</td></tr>
+        <tr><td>INV-1013</td><td>South</td><td>41</td><td>$8,081.00</td></tr>
+        <tr><td>INV-1014</td><td>East</td><td>78</td><td>$9,318.00</td></tr>
+        <tr><td>INV-1015</td><td>West</td><td>25</td><td>$1,555.00</td></tr>
+        <tr><td>INV-1016</td><td>North</td><td>62</td><td>$2,792.00</td></tr>
+        <tr><td>INV-1017</td><td>South</td><td>99</td><td>$4,029.00</td></tr>
+        <tr><td>INV-1018</td><td>East</td><td>46</td><td>$5,266.00</td></tr>
+        <tr><td>INV-1019</td><td>West</td><td>83</td><td>$6,503.00</td></tr>
+        <tr><td>INV-1020</td><td>North</td><td>30</td><td>$7,740.00</td></tr>
+        <tr><td>INV-1021</td><td>South</td><td>67</td><td>$8,977.00</td></tr>
+        <tr><td>INV-1022</td><td>East</td><td>14</td><td>$1,214.00</td></tr>
+        <tr><td>INV-1023</td><td>West</td><td>51</td><td>$2,451.00</td></tr>
+        <tr><td>INV-1024</td><td>North</td><td>88</td><td>$3,688.00</td></tr>
+        <tr><td>INV-1025</td><td>South</td><td>35</td><td>$4,925.00</td></tr>
+        <tr><td>INV-1026</td><td>East</td><td>72</td><td>$6,162.00</td></tr>
+        <tr><td>INV-1027</td><td>West</td><td>19</td><td>$7,399.00</td></tr>
+        <tr><td>INV-1028</td><td>North</td><td>56</td><td>$8,636.00</td></tr>
+        <tr><td>INV-1029</td><td>South</td><td>93</td><td>$9,873.00</td></tr>
+        <tr><td>INV-1030</td><td>East</td><td>40</td><td>$2,110.00</td></tr>
+        <tr><td>INV-1031</td><td>West</td><td>77</td><td>$3,347.00</td></tr>
+        <tr><td>INV-1032</td><td>North</td><td>24</td><td>$4,584.00</td></tr>
+        <tr><td>INV-1033</td><td>South</td><td>61</td><td>$5,821.00</td></tr>
+        <tr><td>INV-1034</td><td>East</td><td>98</td><td>$7,058.00</td></tr>
+        <tr><td>INV-1035</td><td>West</td><td>45</td><td>$8,295.00</td></tr>
+        <tr><td>INV-1036</td><td>North</td><td>82</td><td>$9,532.00</td></tr>
+        <tr><td>INV-1037</td><td>South</td><td>29</td><td>$1,769.00</td></tr>
+        <tr><td>INV-1038</td><td>East</td><td>66</td><td>$3,006.00</td></tr>
+        <tr><td>INV-1039</td><td>West</td><td>13</td><td>$4,243.00</td></tr>
+        <tr><td>INV-1040</td><td>North</td><td>50</td><td>$5,480.00</td></tr>
+        <tr><td>INV-1041</td><td>South</td><td>87</td><td>$6,717.00</td></tr>
+        <tr><td>INV-1042</td><td>East</td><td>34</td><td>$7,954.00</td></tr>
+        <tr><td>INV-1043</td><td>West</td><td>71</td><td>$9,191.00</td></tr>
+        <tr><td>INV-1044</td><td>North</td><td>18</td><td>$1,428.00</td></tr>
+        <tr><td>INV-1045</td><td>South</td><td>55</td><td>$2,665.00</td></tr>
+        <tr><td>INV-1046</td><td>East</td><td>92</td><td>$3,902.00</td></tr>
+        <tr><td>INV-1047</td><td>West</td><td>39</td><td>$5,139.00</td></tr>
+        <tr><td>INV-1048</td><td>North</td><td>76</td><td>$6,376.00</td></tr>
+      </tbody>
+    </table>
+    <p class="caption">Each repeated header makes the continuation taller, and that
+      growth moves everything after the table down with it &mdash; without it this
+      paragraph was drawn over the last rows. <code>&lt;tfoot&gt;</code> is still
+      drawn once, at the end of the table.</p>
+  </section>
+
 </body>
 </html>
