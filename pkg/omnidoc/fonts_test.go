@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"golang.org/x/image/font/gofont/gobold"
 )
 
 // The public font seams must be nameable and implementable from outside this
@@ -97,5 +99,39 @@ func TestBundledFontsPrintGreekCyrillicHebrewAndAccentedLatin(t *testing.T) {
 		if strings.Contains(l, "no glyph for") {
 			t.Errorf("missing glyph: %s", l)
 		}
+	}
+}
+
+// Through the public API, in hermetic bundled mode: box-drawing characters the
+// bundle lacks draw as .notdef without a fonts directory, and from the
+// directory's font with one.
+func TestWithFallbackFontDirCoversWhatTheBundleLacks(t *testing.T) {
+	src := []byte(`<!doctype html><html style="font-family: sans-serif"><body><p>Box ─░▲</p></body></html>`)
+	missing := func(opts ...HTMLOption) int {
+		var n int
+		opts = append(opts, WithDefaultPaged(), WithBundledFonts(), WithLogf(func(f string, a ...any) {
+			if strings.Contains(fmt.Sprintf(f, a...), "no glyph for") {
+				n++
+			}
+		}))
+		doc, err := OpenHTMLBytes(src, opts...)
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		var pdf bytes.Buffer
+		if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
+			t.Fatalf("write: %v", err)
+		}
+		return n
+	}
+	if missing() == 0 {
+		t.Fatal("precondition: the bundle already covers ─░▲, pick other characters")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "Extra.ttf"), gobold.TTF, 0o644); err != nil {
+		t.Fatalf("write font: %v", err)
+	}
+	if n := missing(WithFallbackFontDir(dir)); n != 0 {
+		t.Errorf("%d characters still missing with the fonts directory", n)
 	}
 }

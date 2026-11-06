@@ -668,14 +668,19 @@ bullet's design rationale is in its PR:
   LEFT-TO-RIGHT so the pipeline stays logical up to the single L2 reorder; harfbuzz would otherwise
   emit visual order and be reversed twice. Glyphs carry their cluster's runes exactly once, so
   `/ToUnicode` neither duplicates nor drops text. Showcase §15 "Real script".
-- **Bundled RTL faces + per-rune script fallback** (`pkg/internal/font/standard`, `pkg/internal/layout/font/cache.go`,
+- **Bundled RTL faces + per-character font fallback** (`pkg/internal/font/standard`, `pkg/internal/layout/font/cache.go`,
   `pkg/internal/layout/inline/shape.go`): Noto Sans Hebrew and Noto Naskh Arabic (both OFL 1.1, no Reserved
   Font Name) ship alongside the Latin substitutes. Each bundled face covers exactly ONE script — the
   Latin faces have no Hebrew or Arabic, the Noto faces have no Latin — so the covering face resolves
-  per **rune**, not per run. A Hebrew or Arabic phrase inside an otherwise-Latin paragraph now shapes
-  instead of being silently dropped. Results cache per (script, style), and the fallback consults
-  bundled faces only. A fallback glyph carries the face it resolved from, since a GID is only
-  meaningful against its own face.
+  per **rune**, not per run. Per-character font fallback (CSS Fonts 4 §5.3): a character the run's
+  face lacks is looked up in each later family of the `font-family` list, then the bundled script
+  faces (Hebrew, Arabic, Greek, Cyrillic), then the fonts of a caller-supplied directory
+  (`WithFallbackFontDir`), then installed fallback families (Noto, DejaVu and the platform CJK,
+  Indic, Thai and symbol fonts; emoji fonts first for emoji). Each candidate must have the glyph.
+  Bundled mode (`WithBundledFonts`) skips installed fonts but keeps the supplied directory. The
+  directory skips font collections (`.ttc`, `.otc`) and unreadable files with a log. Answers cache
+  per (rune, family list, style). A fallback glyph carries the face it resolved from, since a GID is
+  only meaningful against its own face.
 - **Vertical font metrics** (`pkg/internal/font/program.go`, `family.go`): `Face.GlyphVAdvance` and
   `Face.VMetrics` expose `vmtx`/`vhea` alongside the horizontal `GlyphAdvance`/`Metrics`, for
   vertical writing modes. **The advance is normalized to a POSITIVE downward distance in em units**

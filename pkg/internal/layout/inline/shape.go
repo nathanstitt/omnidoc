@@ -478,11 +478,11 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 				}
 				seg := runes[ri:end]
 				// The run's own face may not cover the script (a Latin family with an
-				// Arabic phrase in it); fall back to the covering bundled face first, so
-				// shaping runs against the face that actually has the glyphs.
+				// Arabic phrase in it); fall back to a covering face first, so shaping
+				// runs against the face that actually has the glyphs.
 				shapeFace := face
 				if _, _, ok := face.Glyph(rn); !ok {
-					if fb, fbOK := faces.ResolveScriptFallback(rn, style); fbOK {
+					if fb, fbOK := faces.ResolveFallback(rn, r.Family, style); fbOK {
 						shapeFace = fb
 					}
 				}
@@ -573,11 +573,12 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 				outline, advEm, ok := face.Glyph(rn)
 				glyphFace := face
 				if !ok {
-					// The run's family has no glyph for this rune. Before dropping it,
-					// try a bundled face that covers its script: each bundled face
-					// covers one script, so Hebrew or Arabic inside an otherwise-Latin
-					// paragraph resolves here rather than vanishing.
-					if fb, fbOK := faces.ResolveScriptFallback(rn, style); fbOK {
+					// The run's face has no glyph for this rune. Before dropping it,
+					// fall back per character: the rest of the font-family list, then
+					// a bundled script face, then the supplied fonts directory, then
+					// installed fallback fonts. So Hebrew, CJK or a symbol inside an
+					// otherwise-Latin paragraph resolves here rather than vanishing.
+					if fb, fbOK := faces.ResolveFallback(rn, r.Family, style); fbOK {
 						if o, a, gOK := fb.Glyph(rn); gOK {
 							outline, advEm, ok, glyphFace = o, a, true, fb
 						} else if gid, adv, cOK := colorGlyphIn(fb, rn); cOK {

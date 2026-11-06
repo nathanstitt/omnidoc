@@ -38,7 +38,10 @@ type openConfig struct {
 	// bundledFonts selects hermetic bundled-font mode (no OS system-font lookup). Default
 	// false = system mode. Set by WithBundledFonts.
 	bundledFonts bool
-	logf         func(string, ...any)
+	// fallbackFontDir is a directory whose fonts join per-character fallback. Set
+	// by WithFallbackFontDir.
+	fallbackFontDir string
+	logf            func(string, ...any)
 	// media is the cascade media context. It defaults to css.MediaScreen (the
 	// interactive/HTML render); WithPrintMedia switches it to css.MediaPrint so
 	// @media print rules apply (used for PDF output).
@@ -165,6 +168,17 @@ func WithSystemFontProvider(p SystemFontProvider) HTMLOption {
 // for reproducibility.
 func WithBundledFonts() HTMLOption {
 	return func(c *openConfig) { c.bundledFonts = true }
+}
+
+// WithFallbackFontDir adds every font file in dir (.ttf, .otf, .woff, .woff2)
+// to per-character fallback: a character no family in the font-family list and
+// no bundled face can draw is looked up in these fonts, in file-name order,
+// before any installed font. Unlike WithSystemFontProvider it leaves installed
+// fonts on, matches by glyph rather than by family name, and also applies in
+// bundled mode (the caller chose these files). Font collections (.ttc, .otc)
+// are skipped with a log. "" is ignored.
+func WithFallbackFontDir(dir string) HTMLOption {
+	return func(c *openConfig) { c.fallbackFontDir = dir }
 }
 
 // WithLogf sets a logger for layout/degradation diagnostics (may be called during
@@ -311,6 +325,9 @@ func htmlDocument(data []byte, cfg openConfig) (*Document, error) {
 		sys = layoutfont.NewOSFontProviderWithLogf(cfg.logf)
 	}
 	faces := layoutfont.NewFaceCacheWithFonts(fontFaces, cfg.loader, sys, cfg.logf)
+	if cfg.fallbackFontDir != "" {
+		faces.SetFallbackDir(cfg.fallbackFontDir)
+	}
 	engine := layoutcss.New(faces, cfg.loader, cfg.logf)
 	// The page's author CSS cascades into inline <svg> content. pkg/internal/svg re-parses an
 	// inline <svg> from the markup pkg/internal/html serialized, so it never sees the host

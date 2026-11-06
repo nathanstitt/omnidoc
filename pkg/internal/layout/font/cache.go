@@ -10,6 +10,9 @@ package font
 
 import (
 	"context"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 
@@ -35,8 +38,14 @@ type cacheEntry struct {
 // is safe for concurrent use. The zero value is not usable; build one with
 // NewFaceCache.
 type FaceCache struct {
-	mu    sync.Mutex
-	faces map[faceKey]cacheEntry
+	mu        sync.Mutex
+	faces     map[faceKey]cacheEntry
+	fallbacks map[fallbackKey]cacheEntry
+	// fallbackDir is a caller-supplied directory whose fonts join per-character
+	// fallback; its faces load once, on the first rune that needs them.
+	fallbackDir string
+	dirFaces    []*pkgfont.Face
+	dirLoaded   bool
 
 	// Web-font resolution state (nil/empty for bundled-only caches, e.g. DOCX).
 	fontFaces map[string][]gcss.FontFace // normalized family -> @font-face entries
@@ -49,7 +58,8 @@ type FaceCache struct {
 // NewFaceCacheWithFonts to observe degradation.
 func NewFaceCache() *FaceCache {
 	return &FaceCache{
-		faces: make(map[faceKey]cacheEntry),
+		faces:     make(map[faceKey]cacheEntry),
+		fallbacks: map[fallbackKey]cacheEntry{},
 		// Non-nil so every resolution path can log unconditionally, matching the
 		// invariant NewFaceCacheWithFonts establishes.
 		logf: func(string, ...any) {},
@@ -72,6 +82,7 @@ func NewFaceCacheWithFonts(faces []gcss.FontFace, loader resource.ResourceLoader
 	}
 	return &FaceCache{
 		faces:     make(map[faceKey]cacheEntry),
+		fallbacks: map[fallbackKey]cacheEntry{},
 		fontFaces: byFamily,
 		loader:    loader,
 		sys:       sys,
@@ -106,38 +117,177 @@ func (c *FaceCache) Resolve(family string, style pkgfont.Style) (*pkgfont.Face, 
 	return face, ok
 }
 
-// ResolveScriptFallback returns a bundled face covering r, for a rune the run's own
-// family cannot map, or ok=false when none does.
+// fallbackKey caches one rune's fallback for a run's font-family list and style.
+type fallbackKey struct {
+	r      rune
+	family string
+	style  pkgfont.Style
+}
+
+// systemFallbackFamilies are installed families tried, in order, for a rune no
+// family in the list and no bundled face covers. The list names the common
+// Linux packages (Noto, DejaVu) and the macOS and Windows fonts for CJK, Indic,
+// Thai and symbols; each is used only if it has the glyph.
+var systemFallbackFamilies = []string{
+	"Noto Sans", "Noto Sans CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK TC",
+	"Noto Sans Devanagari", "Noto Sans Bengali", "Noto Sans Tamil", "Noto Sans Thai",
+	"Noto Sans Symbols", "Noto Sans Symbols 2", "DejaVu Sans",
+	"PingFang SC", "Hiragino Sans", "Apple SD Gothic Neo", "Kohinoor Devanagari", "Thonburi", "Apple Symbols",
+	"Microsoft YaHei", "Yu Gothic", "Malgun Gothic", "Nirmala UI", "Leelawadee UI", "Segoe UI Symbol",
+	"Arial Unicode MS",
+}
+
+// collectionExts are font-collection extensions the fallback directory skips:
+// the parser reads only a collection's first face, and the PDF writer cannot
+// embed a face taken from a collection.
+var collectionExts = []string{".ttc", ".otc"}
+
+// SetFallbackDir names a directory whose font files (.ttf, .otf, .woff, .woff2)
+// join per-character fallback after the bundled script faces. "" turns it off.
+// Call it before layout.
+func (c *FaceCache) SetFallbackDir(dir string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.fallbackDir, c.dirFaces, c.dirLoaded = dir, nil, false
+	clear(c.fallbacks)
+}
+
+// dirFallbackFaces loads the fallback directory's fonts once, in file-name
+// order, logging and skipping a file that cannot be read or parsed and a font
+// collection. Lazy, so a document that never misses a glyph never parses a
+// (possibly huge) CJK font. Caller holds c.mu.
+func (c *FaceCache) dirFallbackFaces() []*pkgfont.Face {
+	if c.dirLoaded || c.fallbackDir == "" {
+		return c.dirFaces
+	}
+	c.dirLoaded = true
+	entries, err := os.ReadDir(c.fallbackDir)
+	if err != nil {
+		c.logf("font: fallback directory %q: %v", c.fallbackDir, err)
+		return nil
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		ext := strings.ToLower(filepath.Ext(e.Name()))
+		if slices.Contains(collectionExts, ext) {
+			c.logf("font: fallback directory %q: %s: skipped, font collections are not supported", c.fallbackDir, e.Name())
+			continue
+		}
+		if !slices.Contains(fontExts, ext) {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(c.fallbackDir, e.Name()))
+		if err != nil {
+			c.logf("font: fallback directory %q: %s: %v", c.fallbackDir, e.Name(), err)
+			continue
+		}
+		face, err := pkgfont.LoadSFNT(data)
+		if err != nil {
+			c.logf("font: fallback directory %q: %s: %v", c.fallbackDir, e.Name(), err)
+			continue
+		}
+		c.dirFaces = append(c.dirFaces, face)
+	}
+	return c.dirFaces
+}
+
+// ResolveFallback returns a face with a glyph for r, for a rune the run's own
+// face cannot map. The order follows CSS Fonts 4 §5.3 (per-character fallback):
+//  1. each family of the run's font-family list (@font-face, installed, bundled);
+//  2. the bundled script face (Hebrew, Arabic, Greek, Cyrillic);
+//  3. the fonts in the caller-supplied fallback directory (SetFallbackDir);
+//  4. installed fallback families, emoji fonts first for an emoji rune. With no
+//     system provider (bundled mode) this step finds nothing.
 //
-// Each bundled face covers one script — the Latin substitutes have no Hebrew or
-// Arabic, and the two Noto faces have no Latin — so a paragraph mixing scripts needs
-// a covering face chosen per RUNE. Results are cached under a synthetic family key so
-// the program is parsed once per (script, style), not once per glyph.
-//
-// It deliberately consults only the BUNDLED faces: a fallback triggers when the
-// author's chosen family lacks the character, and quietly substituting a downloaded
-// @font-face or a system font there would be a surprising second guess at intent.
-func (c *FaceCache) ResolveScriptFallback(r rune, style pkgfont.Style) (*pkgfont.Face, bool) {
-	// Emoji come FIRST and take a different route: the bundle has no emoji face (a
-	// colour emoji font is megabytes, far past what the toolkit embeds), so they
-	// resolve through the injected system provider instead. Without this, an emoji in
-	// ordinary text falls through to the Latin substitutes, which have no glyph for it
-	// — the reason "Hi 😀" rendered as "Hi " with nothing after it.
-	if isEmojiRune(r) {
-		if face, ok := c.resolveEmojiFallback(style); ok {
+// Every candidate is checked for the glyph, so an installed emoji font without
+// U+2713 does not win by being first. Answers, misses included, are cached per
+// (rune, list, style).
+func (c *FaceCache) ResolveFallback(r rune, family string, style pkgfont.Style) (*pkgfont.Face, bool) {
+	key := fallbackKey{r: r, family: normalizeFamily(family), style: style}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if e, found := c.fallbacks[key]; found {
+		return e.face, e.ok
+	}
+	face, ok := c.findFallback(r, family, style)
+	c.fallbacks[key] = cacheEntry{face: face, ok: ok}
+	return face, ok
+}
+
+// findFallback walks the fallback order for r. Caller holds c.mu.
+func (c *FaceCache) findFallback(r rune, family string, style pkgfont.Style) (*pkgfont.Face, bool) {
+	for _, name := range splitFamilyList(family) {
+		if face, ok := c.singleFamily(name, style); ok && hasGlyph(face, r) {
 			return face, true
 		}
-		// No emoji font on this host: fall through, and the caller degrades to the
-		// missing-glyph path rather than painting a wrong character.
 	}
+	if face, ok := c.bundledScriptFace(r, style); ok && hasGlyph(face, r) {
+		return face, true
+	}
+	for _, face := range c.dirFallbackFaces() {
+		if hasGlyph(face, r) {
+			return face, true
+		}
+	}
+	candidates := systemFallbackFamilies
+	if isEmojiRune(r) {
+		candidates = append(slices.Clone(emojiFallbackFamilies), systemFallbackFamilies...)
+	}
+	for _, name := range candidates {
+		if face, ok := c.installedFamily(name, style); ok && hasGlyph(face, r) {
+			return face, true
+		}
+	}
+	return nil, false
+}
+
+func hasGlyph(face *pkgfont.Face, r rune) bool {
+	gid, ok := face.GID(r)
+	return ok && gid != 0
+}
+
+// singleFamily resolves one family name with no terminal serif substitution
+// (resolveList's last resort would claim every rune the serif has). Cached.
+// Caller holds c.mu.
+func (c *FaceCache) singleFamily(name string, style pkgfont.Style) (*pkgfont.Face, bool) {
+	key := faceKey{family: "\x00single:" + normalizeFamily(name), style: style}
+	if e, found := c.faces[key]; found {
+		return e.face, e.ok
+	}
+	face, ok := c.resolveFontFace(name, style)
+	if !ok {
+		face, ok = c.resolveProvider(name, style)
+	}
+	if !ok {
+		face, ok = pkgfont.LoadStandard(name, style)
+	}
+	c.faces[key] = cacheEntry{face: face, ok: ok}
+	return face, ok
+}
+
+// installedFamily resolves a family only through the system provider. Cached,
+// because a CJK program is megabytes and decoding it per rune would dominate.
+// Caller holds c.mu.
+func (c *FaceCache) installedFamily(name string, style pkgfont.Style) (*pkgfont.Face, bool) {
+	key := faceKey{family: "\x00installed:" + normalizeFamily(name), style: style}
+	if e, found := c.faces[key]; found {
+		return e.face, e.ok
+	}
+	face, ok := c.resolveProvider(name, style)
+	c.faces[key] = cacheEntry{face: face, ok: ok}
+	return face, ok
+}
+
+// bundledScriptFace is the bundled face for r's script. Cached under the
+// script, so the program is parsed once per (script, style). Caller holds c.mu.
+func (c *FaceCache) bundledScriptFace(r rune, style pkgfont.Style) (*pkgfont.Face, bool) {
 	script, ok := fallbackScriptOf(r)
 	if !ok {
 		return nil, false
 	}
 	key := faceKey{family: "\x00fallback:" + script, style: style}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
 	if e, found := c.faces[key]; found {
 		return e.face, e.ok
 	}
@@ -160,31 +310,6 @@ var emojiFallbackFamilies = []string{
 	"Twemoji Mozilla",   // Firefox's bundled emoji font
 	"EmojiOne Color",
 	"Symbola", // monochrome, but covers the range
-}
-
-// resolveEmojiFallback finds an installed emoji face, cached under one synthetic key
-// so the (expensive) provider lookup happens once per style per document.
-func (c *FaceCache) resolveEmojiFallback(style pkgfont.Style) (*pkgfont.Face, bool) {
-	key := faceKey{family: "\x00fallback:emoji", style: style}
-
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if e, found := c.faces[key]; found {
-		return e.face, e.ok
-	}
-	var face *pkgfont.Face
-	ok := false
-	for _, fam := range emojiFallbackFamilies {
-		if f, hit := c.resolveProvider(fam, style); hit {
-			face, ok = f, true
-			break
-		}
-	}
-	if ok {
-		c.logf("font: emoji fallback resolved to an installed colour font")
-	}
-	c.faces[key] = cacheEntry{face: face, ok: ok}
-	return face, ok
 }
 
 // isEmojiRune reports whether r is in a range an emoji font is expected to cover.
