@@ -97,3 +97,31 @@ func TestLoadStandardUnsupported(t *testing.T) {
 		}
 	}
 }
+
+// The bundled TeX Gyre programs map accented code points to their small-cap
+// alternates in the built-in cmap; a name route must win, so "Zoë" does not
+// print as "Zoᴇ̈" in a small-cap e.
+func TestStandardFacesMapAccentedLatinToPlainGlyphs(t *testing.T) {
+	want := map[rune]string{
+		'é': "eacute", 'ñ': "ntilde", 'ü': "udieresis", 'Å': "Aring",
+		'ł': "lslash", 'Ł': "Lslash", 'č': "ccaron", 'ő': "ohungarumlaut",
+	}
+	for _, family := range []string{"sans-serif", "serif"} {
+		for _, style := range []Style{{}, {Bold: true}, {Italic: true}} {
+			face, ok := LoadStandard(family, style)
+			if !ok {
+				t.Fatalf("LoadStandard(%q, %+v) failed", family, style)
+			}
+			for r, name := range want {
+				gid, ok := face.GID(r)
+				if !ok {
+					t.Errorf("%s %+v: no glyph for %q", family, style, r)
+					continue
+				}
+				if got := face.GlyphName(gid); got != name {
+					t.Errorf("%s %+v: %q drew glyph %q, want %q", family, style, r, got, name)
+				}
+			}
+		}
+	}
+}

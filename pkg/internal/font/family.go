@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/benoitkugler/textlayout/fonts"
+	"github.com/benoitkugler/textlayout/fonts/glyphsnames"
 	"github.com/benoitkugler/textlayout/fonts/truetype"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/font/standard"
@@ -61,8 +62,9 @@ const (
 // embedded document font), and cache it — parsing the font program is the
 // expensive step.
 type Face struct {
-	prog  *program
-	names map[string]fonts.GID // glyph name → GID, built once for the name route
+	prog    *program
+	names   map[string]fonts.GID // glyph name → GID, built once for the name route
+	aglGIDs map[rune]fonts.GID   // rune → GID by plain Adobe Glyph List name (no ".sc"/".alt" suffix)
 
 	progData []byte      // raw program bytes for embedding (nil if not retained)
 	progKind ProgramKind // format of progData
@@ -154,9 +156,11 @@ func LoadStandard(family string, style Style) (*Face, bool) {
 	if err != nil {
 		return nil, false
 	}
+	names := prog.nameToGID()
 	return &Face{
 		prog:     prog,
-		names:    prog.nameToGID(),
+		names:    names,
+		aglGIDs:  aglRuneGIDs(names),
 		progData: sub.Data,
 		progKind: programKindFromStandard(sub.Kind),
 	}, true
@@ -179,9 +183,11 @@ func LoadScriptFallback(r rune, style Style) (*Face, bool) {
 	if err != nil {
 		return nil, false
 	}
+	names := prog.nameToGID()
 	return &Face{
 		prog:     prog,
-		names:    prog.nameToGID(),
+		names:    names,
+		aglGIDs:  aglRuneGIDs(names),
 		progData: sub.Data,
 		progKind: programKindFromStandard(sub.Kind),
 	}, true
@@ -229,10 +235,35 @@ func (f *Face) gidForRune(r rune) (fonts.GID, bool) {
 			return gid, true
 		}
 	}
+	if gid, ok := f.aglGIDs[r]; ok {
+		return gid, true
+	}
 	if gid, ok := f.prog.gidForRune(r); ok {
 		return gid, true
 	}
 	return 0, false
+}
+
+// aglRuneGIDs maps each rune to the glyph whose plain Adobe Glyph List name
+// spells it ("eacute" → é, "uni0151" → ő). A suffixed name ("eacute.sc",
+// "a.alt") is an alternate and is skipped, so a rune never resolves to a
+// small-cap or stylistic variant. Two plain names for one rune keep the lower
+// GID, so the choice does not depend on map order.
+func aglRuneGIDs(names map[string]fonts.GID) map[rune]fonts.GID {
+	out := make(map[rune]fonts.GID, len(names))
+	for name, gid := range names {
+		if gid == 0 || strings.ContainsRune(name, '.') {
+			continue
+		}
+		r, ok := glyphsnames.GlyphToRune(name)
+		if !ok || r == 0 {
+			continue
+		}
+		if prev, seen := out[r]; !seen || gid < prev {
+			out[r] = gid
+		}
+	}
+	return out
 }
 
 // ProgramBytes returns the raw font-program bytes for embedding and their format.
