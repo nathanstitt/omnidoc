@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**40 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
+**39 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -88,13 +88,6 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   `splitTableRowThroughCells` set `Collapsed` to nil on both the head and the tail (`tablepage.go`),
   so a `border-collapse: collapse` table that spans pages loses every cell border on every page it
   spans. Needs the collapsed strips clipped per fragment (and shifted with the repeated header).
-- ☐ **F11. Content after a split table overlaps the table's last rows.** *Medium.* Each repeated
-  `<thead>` (or a caption repeated by the wrapper split) grows the tail by its height
-  (`repeatHeaderOnTail`, `tablepage.go`), but the blocks after the table keep their Y, so on the
-  table's last page the next block is drawn over the last rows — one header height per repeat (a
-  2026-11-06 probe: 48 rows over three pages, the following paragraph covered the last two rows).
-  A table in a `<caption>` wrapper also repeats the caption, not the `<thead>`, on continuation
-  pages. Needs the growth carried to the following siblings and the enclosing ancestors.
 
 ## HTML/CSS — web fonts
 

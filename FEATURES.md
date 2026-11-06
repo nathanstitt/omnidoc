@@ -220,7 +220,10 @@ bullet's design rationale is in its PR:
   table. Grid construction flattens the head/body/footer distinction away, so the header's bottom
   Y is recorded on the table fragment as `HeaderBottom` and the cells above it are deep-cloned onto
   each tail. The tail's own `HeaderBottom` is then re-anchored to its copy, so a table spanning three
-  or more pages keeps repeating.
+  or more pages keeps repeating. A top `<caption>` stays with the table's first part and is not
+  repeated. Each repeat makes the tail taller, and that growth is carried to everything after the
+  table (later siblings at any depth, later blocks, root floats, and the html/body wrapper), so the
+  content that follows starts below the table's last row.
 - **Mid-cell table splitting** (`pkg/internal/layout/css/tablepage.go`): a table row taller than the page —
   including a single-row table — splits THROUGH its cells rather than overflowing and being clipped.
   A cell's content is an ordinary fragment spine, so the recursive splitter handles it with no

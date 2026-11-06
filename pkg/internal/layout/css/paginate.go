@@ -72,7 +72,8 @@ func (e *Engine) paginate(root *Fragment, viewportW, pageH float64) *layout.Page
 	// the body content width (border box minus the body's own border + padding). It is
 	// needed to recover a block's used top margin when retaining it at an unforced break.
 	cbWidth := contentWidth(body, viewportW)
-	buckets := bucketBlocks(body.Children, pageH, cbWidth, e.logf)
+	buckets, grown := bucketBlocksGrowing(body.Children, pageH, cbWidth, e.logf)
+	applySplitGrowth(grown, root.Floats, root, body)
 
 	// Pull the FIRST page's top up to the outermost wrapper border-box top when the
 	// html/body wrapper has a border or background ABOVE the first block (its top border +
@@ -412,8 +413,28 @@ func splitFloatsByPage(root *Fragment, buckets []pageBucket) [][]*Fragment {
 // content at its END (a nested break propagated to the top-level ancestor), so the
 // common `.page-break { break-before: page }` on a nested element is honored.
 func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, ...any)) []pageBucket {
+	buckets, _ := bucketBlocksGrowing(blocks, pageH, cbWidth, logf)
+	return buckets
+}
+
+// bucketBlocksGrowing is bucketBlocks that also returns the growths of split tails
+// (repeated table headers), in the order they happened. The blocks after a grown tail
+// are moved down here; the caller must move the out-of-flow content it owns (the
+// root's floats) and the wrapper's height by the same growths — see applySplitGrowth.
+func bucketBlocksGrowing(blocks []*Fragment, pageH, cbWidth float64, logf func(string, ...any)) ([]pageBucket, []splitGrowth) {
 	if len(blocks) == 0 {
-		return []pageBucket{{top: 0}}
+		return []pageBucket{{top: 0}}, nil
+	}
+	var grown []splitGrowth
+	// queueGrownTail queues a split's tail and moves every later block down by the
+	// tail's growth, so the block after a table whose header repeated starts below the
+	// table's real bottom instead of over its last rows.
+	queueGrownTail := func(work *[]*Fragment, i int, res splitResult) {
+		queueTail(work, i, res.tail)
+		if dy := totalGrowth(res.grow); dy > 0 {
+			shiftFragments((*work)[i+2:], dy)
+			grown = append(grown, res.grow...)
+		}
 	}
 	// work is a mutable copy: a widows/orphans line split replaces the current block
 	// with its head (placed) and inserts its tail as the next item to process (so a tail
@@ -496,7 +517,7 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 				cur.blocks = append(cur.blocks, res.head)
 				buckets = append(buckets, cur)
 				cur = pageBucket{top: res.tail.Y}
-				queueTail(&work, i, res.tail)
+				queueGrownTail(&work, i, res)
 				prevBlock = res.head
 				continue
 			}
@@ -508,7 +529,7 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 				cur.blocks = append(cur.blocks, res.head)
 				buckets = append(buckets, cur)
 				cur = pageBucket{top: res.tail.Y} // tail's top edge is suppressed → flush
-				queueTail(&work, i, res.tail)
+				queueGrownTail(&work, i, res)
 				prevBlock = res.head
 				continue
 			}
@@ -553,7 +574,7 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 				cur.blocks = append(cur.blocks, res.head)
 				buckets = append(buckets, cur)
 				cur = pageBucket{top: res.tail.Y}
-				queueTail(&work, i, res.tail)
+				queueGrownTail(&work, i, res)
 				prevBlock = res.head
 				continue
 			}
@@ -580,7 +601,27 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 	if len(buckets) == 0 {
 		buckets = append(buckets, pageBucket{top: 0})
 	}
-	return buckets
+	return buckets, grown
+}
+
+// applySplitGrowth moves the content outside the bucketed blocks by the split-tail
+// growths bucketBlocksGrowing reported: each float at or below a growth's Y moves down
+// by its dy, and each wrapper (html, body) grows by the total so its bottom border and
+// background still close below the last block. Growths are applied in order, because
+// each one's Y is in the frame left by the growths before it.
+func applySplitGrowth(grown []splitGrowth, floats []*Fragment, wrappers ...*Fragment) {
+	for _, g := range grown {
+		for _, fl := range floats {
+			if fl.Y >= g.at-0.5 {
+				translateFragment(fl, 0, g.dy)
+			}
+		}
+		for _, w := range wrappers {
+			if w != nil {
+				w.H += g.dy
+			}
+		}
+	}
 }
 
 // queueTail inserts a split block's tail into the work slice at index i+1 so the

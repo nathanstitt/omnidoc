@@ -200,7 +200,8 @@ func (e *Engine) paginateDoc(root *Fragment, cfg PagedConfig) *layout.Pages {
 	}
 
 	cbWidth := contentWidth(body, g0.contentW)
-	buckets := bucketBlocks(body.Children, g0.contentH, cbWidth, e.logf)
+	buckets, grown := bucketBlocksGrowing(body.Children, g0.contentH, cbWidth, e.logf)
+	applySplitGrowth(grown, root.Floats, root, body)
 
 	// Pull page 0's top up to include the wrapper's own top border/background (same as
 	// paginate) so a body top border shows on page 0.
@@ -579,7 +580,7 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		}
 		runBlocks := blocks[r.start:r.end]
 		cb := contentWidth(bodyFragment(layoutByWidth[geom.contentW]), geom.contentW)
-		bks := bucketBlocks(runBlocks, geom.contentH, cb, e.logf)
+		bks, grown := bucketBlocksGrowing(runBlocks, geom.contentH, cb, e.logf)
 		// Split this run's out-of-flow floats across its buckets (cloned + shifted into
 		// each bucket's local frame). Without this, floats in a named-page section were
 		// dropped entirely (paginateRuns nil'd Floats and never re-attached them).
@@ -595,6 +596,7 @@ func (e *Engine) paginateRuns(ctx context.Context, root *cssbox.Box, base *Fragm
 		for _, fl := range ownFloats {
 			attributed[fl] = true
 		}
+		applySplitGrowth(grown, ownFloats)
 		runFloats := floatsForRun(ownFloats, bks)
 		// Split this run's positioned layer (relative blocks re-attached by pointer; page-CB
 		// abs boxes routed to their band + cloned + shifted; fixed boxes cloned onto every

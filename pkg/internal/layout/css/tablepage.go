@@ -4,6 +4,7 @@ import (
 	"sort"
 
 	"github.com/nathanstitt/omnidoc/pkg/internal/layout"
+	"github.com/nathanstitt/omnidoc/pkg/internal/layout/cssbox"
 )
 
 // splitTableForPage splits a table fragment BETWEEN rows at pageBottom. The CSS table
@@ -61,8 +62,8 @@ func splitTableForPage(tbl *Fragment, pageBottom float64) splitResult {
 	// Collapsed border strips, if any, are dropped on the split (a documented limitation —
 	// the collapsed grid is computed table-wide and is not re-derived per page fragment).
 	head.Collapsed, tail.Collapsed = nil, nil
-	repeatHeaderOnTail(tbl, &tail, splitY)
-	return splitResult{head: &head, tail: &tail}
+	added := repeatHeaderOnTail(tbl, &tail, splitY)
+	return splitResult{head: &head, tail: &tail, grow: growthAt(tbl, added)}
 }
 
 // splitTableRowThroughCells splits the straddling row's cells at pageBottom, producing
@@ -119,8 +120,8 @@ func splitTableRowThroughCells(tbl *Fragment, row tableRow, pageBottom float64, 
 	// documented limitation as the between-rows path).
 	head.Collapsed, tail.Collapsed = nil, nil
 	distributeOutOfFlow(tbl, &head, &tail, pageBottom)
-	repeatHeaderOnTail(tbl, &tail, pageBottom)
-	return splitResult{head: &head, tail: &tail}, true
+	added := repeatHeaderOnTail(tbl, &tail, pageBottom)
+	return splitResult{head: &head, tail: &tail, grow: growthAt(tbl, added)}, true
 }
 
 // repeatHeaderOnTail prepends a copy of the table's <thead> cells to the tail fragment,
@@ -133,28 +134,37 @@ func splitTableRowThroughCells(tbl *Fragment, row tableRow, pageBottom float64, 
 // The cells are deep-cloned rather than shared: the same header appears on every
 // continuation page, and each page shifts its fragments into a local frame in place, so
 // sharing one cell across pages would have each shift corrupt the others.
-func repeatHeaderOnTail(tbl, tail *Fragment, splitY float64) {
+func repeatHeaderOnTail(tbl, tail *Fragment, splitY float64) (added float64) {
 	if tbl.HeaderBottom <= tbl.Y || splitY <= tbl.HeaderBottom+0.5 {
-		return
+		return 0
+	}
+	// The header starts below a top caption: the caption belongs to the table's first
+	// part only, so it is neither repeated nor counted in the repeated height.
+	headerTop := tbl.Y
+	for _, c := range tbl.Children {
+		if isCaptionFragment(c) && c.Y+c.H <= tbl.HeaderBottom+0.5 && c.Y+c.H > headerTop {
+			headerTop = c.Y + c.H
+		}
 	}
 	var repeated []*Fragment
 	for _, c := range tbl.Children {
-		if c.IsFloat || c.IsPositioned || c.Y+c.H > tbl.HeaderBottom+0.5 {
+		if c.IsFloat || c.IsPositioned || isCaptionFragment(c) || c.Y+c.H > tbl.HeaderBottom+0.5 {
 			continue // not a header cell
 		}
 		// cloneFloatForPageMap is a general alias-preserving deep clone (its name is
 		// historical — it is not float-specific); the seen map is per-cell because
 		// header cells share no descendants.
 		clone := cloneFloatForPageMap(c, map[*Fragment]*Fragment{})
-		translateFragment(clone, 0, tail.Y-tbl.Y)
+		translateFragment(clone, 0, tail.Y-headerTop)
 		repeated = append(repeated, clone)
 	}
 	if len(repeated) == 0 {
-		return
+		return 0
 	}
 	// The repeated header occupies space at the top of the tail, so the body cells that
-	// follow it move down by its height and the tail grows to match.
-	headerH := tbl.HeaderBottom - tbl.Y
+	// follow it move down by its height and the tail grows to match. The caller reports
+	// that growth (splitResult.grow) so the content after the table moves down too.
+	headerH := tbl.HeaderBottom - headerTop
 	for _, c := range tail.Children {
 		translateFragment(c, 0, headerH)
 	}
@@ -166,6 +176,12 @@ func repeatHeaderOnTail(tbl, tail *Fragment, splitY float64) {
 	// original table's value here would point at coordinates the tail no longer has,
 	// and the repeat would silently stop after the second page.
 	tail.HeaderBottom = tail.Y + headerH
+	return headerH
+}
+
+// isCaptionFragment reports whether f is a table caption's fragment.
+func isCaptionFragment(f *Fragment) bool {
+	return f != nil && f.Box != nil && f.Box.Display == cssbox.DisplayTableCaption
 }
 
 // tableRow is one recovered table row: the vertical extent of a band of cells that share

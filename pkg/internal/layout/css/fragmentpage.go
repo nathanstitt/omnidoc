@@ -235,9 +235,10 @@ func splitMixedBlock(parent *Fragment, pageBottom float64, widows, orphans int) 
 	// top-level assumption, and it already refuses a `break-inside: avoid` box, which is
 	// exactly the stop condition CSS requires.
 	var childHead, childTail *Fragment
+	var childGrow []splitGrowth
 	if straddler := inflow[k]; lineSplittable(straddler) {
 		if sub := splitAnyBlockForPage(straddler, pageBottom, widows, orphans); sub.head != nil && sub.tail != nil {
-			childHead, childTail = sub.head, sub.tail
+			childHead, childTail, childGrow = sub.head, sub.tail, sub.grow
 		}
 	}
 
@@ -266,7 +267,17 @@ func splitMixedBlock(parent *Fragment, pageBottom float64, widows, orphans int) 
 	// in-flow child, which can be well below the boundary, and an out-of-flow box in
 	// that gap belongs to the next page rather than overflowing the current one.
 	distributeOutOfFlow(parent, &head, &tail, pageBottom)
-	return splitResult{head: &head, tail: &tail}
+	// A straddler whose tail grew (a repeated table header) pushes down the children
+	// that follow it and makes this tail taller by the same amount.
+	if dy := totalGrowth(childGrow); dy > 0 {
+		for _, c := range tail.Children[1:] {
+			if c.Y >= childGrow[0].at-0.5 {
+				translateFragment(c, 0, dy)
+			}
+		}
+		tail.H += dy
+	}
+	return splitResult{head: &head, tail: &tail, grow: childGrow}
 }
 
 // lastChildBottom returns the largest bottom edge among the IN-FLOW children in list,
@@ -377,6 +388,34 @@ func distributeOutOfFlow(parent, head, tail *Fragment, splitY float64) {
 type splitResult struct {
 	head *Fragment // the part staying on the current page (nil if the block moves whole)
 	tail *Fragment // the part flowing to the next page (nil if the whole block fits)
+	// grow lists where the tail became taller than the part of the block it continues
+	// (a repeated table header), innermost first. Everything laid out below each
+	// growth's at — later siblings, later blocks, and the floats among them — must move
+	// down by its dy, or it is drawn over the end of the grown tail.
+	grow []splitGrowth
+}
+
+// splitGrowth is one block-axis growth of a split tail: the content at or below the
+// page-space Y at (the original bottom of the box that grew) moves down by dy.
+type splitGrowth struct {
+	at, dy float64
+}
+
+// growthAt reports a tail growth of dy below f's original bottom, or none for dy <= 0.
+func growthAt(f *Fragment, dy float64) []splitGrowth {
+	if dy <= 0 {
+		return nil
+	}
+	return []splitGrowth{{at: f.Y + f.H, dy: dy}}
+}
+
+// totalGrowth sums the growths' heights.
+func totalGrowth(grow []splitGrowth) float64 {
+	total := 0.0
+	for _, g := range grow {
+		total += g.dy
+	}
+	return total
 }
 
 // splitBlockForPage decides how a line-splittable block b is placed when the current

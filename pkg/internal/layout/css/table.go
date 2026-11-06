@@ -524,10 +524,19 @@ func (e *Engine) layoutTable(ctx context.Context, b *cssbox.Box, contentW, conte
 
 	// Repeatable-header extent: the bottom of the last <thead> row, so pagination can
 	// clone those cells onto continuation pages. Header rows sort to the front of the
-	// visual row order, so they are rows [0, headerRows).
+	// visual row order, so they are rows [0, headerRows). It is read from the header
+	// cells' FINAL fragments, not the grid's row geometry: the grid rows do not include
+	// the top caption's offset (gridDY) or a header row's baseline growth (rowShift),
+	// and a header bottom short by the caption height selected the caption, not the
+	// <thead>, as the repeatable header.
 	headerBottom := 0.0
 	if n := g.headerRows; n > 0 && n <= len(g.rows) {
-		headerBottom = g.rows[n-1].y + g.rows[n-1].height
+		for i := range g.cells {
+			gc := g.cells[i]
+			if gc.frag != nil && gc.row < n && gc.frag.Y+gc.frag.H > headerBottom {
+				headerBottom = gc.frag.Y + gc.frag.H
+			}
+		}
 	}
 
 	return interior{
