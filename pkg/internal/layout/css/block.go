@@ -1720,6 +1720,12 @@ func shiftFragmentExtras(f *Fragment, dx, dy float64) {
 		f.BgImage.ClipX += dx
 		f.BgImage.ClipY += dy
 	}
+	// HeaderBottom is a Y in the same frame as f.Y; a table moved into page space
+	// must carry it along, or splitTableForPage's `HeaderBottom <= Y` guard sees
+	// the header above the table and skips the repeat.
+	if f.HeaderBottom != 0 {
+		f.HeaderBottom += dy
+	}
 	for i := range f.Collapsed {
 		f.Collapsed[i].XPt += dx
 		f.Collapsed[i].YPt += dy

@@ -1,9 +1,12 @@
 package omnidoc
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
+	"strings"
 	"testing"
 )
 
@@ -91,5 +94,40 @@ func TestLetterConstants(t *testing.T) {
 	}
 	if LetterHeightPt != 1056 {
 		t.Fatalf("LetterHeightPt = %v, want 1056", LetterHeightPt)
+	}
+}
+
+// Through the public API: an HTML table under a heading, written to PDF and read
+// back, carries its header text once per page.
+func TestHTMLTableHeaderRepeatsOnEveryPDFPage(t *testing.T) {
+	var rows strings.Builder
+	for i := 0; i < 120; i++ {
+		fmt.Fprintf(&rows, "<tr><td>row %d</td></tr>", i)
+	}
+	src := `<!doctype html><html><head><style>@page { size: Letter; margin: 0.5in }</style></head><body>` +
+		`<h1>Title above the table</h1><table><thead><tr><th>COLHEAD</th></tr></thead><tbody>` +
+		rows.String() + `</tbody></table></body></html>`
+	doc, err := OpenHTMLBytes([]byte(src), WithDefaultPaged(), WithBundledFonts())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	var pdf bytes.Buffer
+	if err := doc.WritePDF(context.Background(), &pdf, PDFOptions{}); err != nil {
+		t.Fatalf("write pdf: %v", err)
+	}
+	back, err := OpenBytes(pdf.Bytes())
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	var text bytes.Buffer
+	if err := back.WriteText(context.Background(), &text, MarkdownOptions{}); err != nil {
+		t.Fatalf("text: %v", err)
+	}
+	pages := back.PageCount()
+	if pages < 3 {
+		t.Fatalf("want at least 3 pages, got %d", pages)
+	}
+	if got := strings.Count(text.String(), "COLHEAD"); got != pages {
+		t.Errorf("header appears %d times over %d pages", got, pages)
 	}
 }

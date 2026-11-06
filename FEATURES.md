@@ -215,8 +215,8 @@ bullet's design rationale is in its PR:
   untouched, since their Y is already the page-local offset, and a percentage `bottom` is declined
   rather than mis-shifted.
 - **Repeated `<thead>` on continuation pages** (`pkg/internal/layout/css/tablepage.go`, `table.go`): a table
-  split across pages repeats its header rows on every continuation, so a long table keeps its column
-  headings. Grid construction flattens the head/body/footer distinction away, so the header's bottom
+  split across pages repeats its header group on every page it spans, wherever the table starts on
+  the page, so a long table keeps its column headings. `<tfoot>` is drawn once, at the end of the table. Grid construction flattens the head/body/footer distinction away, so the header's bottom
   Y is recorded on the table fragment as `HeaderBottom` and the cells above it are deep-cloned onto
   each tail. The tail's own `HeaderBottom` is then re-anchored to its copy, so a table spanning three
   or more pages keeps repeating.

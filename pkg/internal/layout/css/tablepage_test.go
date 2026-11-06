@@ -330,3 +330,18 @@ func TestRepeatHeaderNoOpWhenSplitInsideHeader(t *testing.T) {
 			len(tail.Children), before+1)
 	}
 }
+
+// A table below other content lays out in its own frame and is then moved into
+// page space. Its HeaderBottom must move with it, or splitTableForPage sees the
+// header above the table's top and never repeats it.
+func TestTableHeaderRepeatsWhenTheTableIsNotFirst(t *testing.T) {
+	pages := pagedTableText(t, "<p>intro</p>"+longTable(40, true), 300)
+	if len(pages) < 3 {
+		t.Fatalf("want at least 3 pages, got %d", len(pages))
+	}
+	for i, txt := range pages {
+		if !strings.Contains(txt, "HEADER") {
+			t.Errorf("page %d is missing the repeated header", i)
+		}
+	}
+}
