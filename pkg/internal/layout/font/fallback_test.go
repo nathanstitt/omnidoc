@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"golang.org/x/image/font/gofont/gobold"
+	"golang.org/x/image/font/gofont/goregular"
 
 	pkgfont "github.com/nathanstitt/omnidoc/pkg/internal/font"
 	"github.com/nathanstitt/omnidoc/pkg/internal/font/standard"
@@ -107,6 +108,34 @@ func TestResolveFallback_SkipsAnInstalledEmojiFontWithoutTheGlyph(t *testing.T) 
 	}
 	if !bytes.Equal(programOf(t, face), gobold.TTF) {
 		t.Errorf("%q came from a font without the glyph", r)
+	}
+}
+
+// For an emoji rune the emoji families come before systemFallbackFamilies: an
+// installed DejaVu Sans that also has the glyph loses to the emoji font.
+func TestResolveFallback_EmojiFamiliesComeBeforeSystemFamilies(t *testing.T) {
+	r := firstRuneMissingFromSans(t, 0x2660, 0x263A, 0x266A)
+	if !isEmojiRune(r) {
+		t.Fatalf("precondition: %q is not an emoji rune", r)
+	}
+	regular, err := pkgfont.LoadSFNT(goregular.TTF)
+	if err != nil {
+		t.Fatalf("load Go Regular: %v", err)
+	}
+	if !hasGlyph(regular, r) {
+		t.Fatalf("precondition: Go Regular has no glyph for %q", r)
+	}
+	fonts := &fakeFonts{byFamily: map[string][]byte{
+		"DejaVu Sans":      gobold.TTF,
+		"Noto Color Emoji": goregular.TTF,
+	}}
+	c := NewFaceCacheWithFonts(nil, nil, fonts, nil)
+	face, ok := c.ResolveFallback(r, "sans-serif", pkgfont.Style{})
+	if !ok {
+		t.Fatalf("no fallback for %q", r)
+	}
+	if !bytes.Equal(programOf(t, face), goregular.TTF) {
+		t.Errorf("%q did not come from the emoji family", r)
 	}
 }
 

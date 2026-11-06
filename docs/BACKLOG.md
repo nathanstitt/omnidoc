@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**31 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
+**33 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -99,6 +99,15 @@ trusting any entry that has aged** — grep for the claimed symptom first.
   (platform-specific).
 - ☐ **G6. Content-addressed fetch cache.** *Small (perf).* `FaceCache` is keyed `(family, style)`
   (`faceKey`, `cache.go`), so one file is fetched per style.
+- ☐ **G7. Font collections in `WithFallbackFontDir`.** *Medium.* The fallback directory skips `.ttc`/`.otc`
+  files with a log (`dirFallbackFaces`, `cache.go`). Serving each face of a collection needs a
+  face-index API in the parser (`parseTrueTypeOrCollection` and `firstFaceOf` read only the first face)
+  and collection-face embedding in the PDF writer (`LoadSFNT` keeps the raw collection bytes, which are
+  not a standalone embeddable sfnt).
+- ☐ **G8. Fallback directory loads under the cache lock.** *Small (perf).* On the first glyph miss,
+  `dirFallbackFaces` reads and parses every file in the directory while holding `FaceCache.mu`, so other
+  `Resolve`/`ResolveFallback` calls on that cache block while large CJK files load. Candidates: parse
+  each file lazily, only when the earlier files lack the glyph, or load outside the lock.
 
 ## HTML/CSS — grid
 

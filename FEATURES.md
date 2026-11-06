@@ -677,8 +677,9 @@ bullet's design rationale is in its PR:
   faces (Hebrew, Arabic, Greek, Cyrillic), then the fonts of a caller-supplied directory
   (`WithFallbackFontDir`), then installed fallback families (Noto, DejaVu and the platform CJK,
   Indic, Thai and symbol fonts; emoji fonts first for emoji). Each candidate must have the glyph.
-  Bundled mode (`WithBundledFonts`) skips installed fonts but keeps the supplied directory. The
-  directory skips font collections (`.ttc`, `.otc`) and unreadable files with a log. Answers cache
+  Bundled mode (`WithBundledFonts`) skips installed fonts, unless the caller supplies a provider,
+  but keeps the supplied directory. A directory face serves every style (no bold/italic
+  selection). The directory skips font collections (`.ttc`, `.otc`) and unreadable files with a log. Answers cache
   per (rune, family list, style). A fallback glyph carries the face it resolved from, since a GID is
   only meaningful against its own face.
 - **Vertical font metrics** (`pkg/internal/font/program.go`, `family.go`): `Face.GlyphVAdvance` and

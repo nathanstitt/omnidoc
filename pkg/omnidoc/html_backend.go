@@ -175,8 +175,9 @@ func WithBundledFonts() HTMLOption {
 // no bundled face can draw is looked up in these fonts, in file-name order,
 // before any installed font. Unlike WithSystemFontProvider it leaves installed
 // fonts on, matches by glyph rather than by family name, and also applies in
-// bundled mode (the caller chose these files). Font collections (.ttc, .otc)
-// are skipped with a log. "" is ignored.
+// bundled mode (the caller chose these files). A directory face is used for
+// every style: there is no bold or italic selection among its files. Font
+// collections (.ttc, .otc) are skipped with a log. "" is ignored.
 func WithFallbackFontDir(dir string) HTMLOption {
 	return func(c *openConfig) { c.fallbackFontDir = dir }
 }
