@@ -45,7 +45,8 @@ const (
 //
 // Glyphs carrying no runes (atomics, hard breaks, and whitespace glyphs the shaper
 // emitted without a rune) are treated as neutral and keep their logical position
-// relative to the runs around them.
+// relative to the runs around them — except a shaped glyph with a BidiRune, which
+// takes that character's class so it moves with its cluster.
 func Reorder(glyphs []Glyph, dir ParagraphDirection) []Glyph {
 	out, _ := reorder(glyphs, dir)
 	return out
@@ -161,6 +162,11 @@ func lineText(glyphs []Glyph) (text []rune, glyphIdx []int) {
 				glyphIdx = append(glyphIdx, i)
 			}
 			text = append(text, g.Runes...)
+		case g.BidiRune != 0:
+			// A shaped glyph without runes takes its cluster's class, so it stays in
+			// its cluster's directional run (see Glyph.BidiRune).
+			text = append(text, g.BidiRune)
+			glyphIdx = append(glyphIdx, i)
 		default:
 			text = append(text, '￼')
 			glyphIdx = append(glyphIdx, i)

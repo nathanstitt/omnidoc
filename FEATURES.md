@@ -680,7 +680,9 @@ bullet's design rationale is in its PR:
   visual output is reversed back to logical order so the pipeline stays logical up to the single
   L2 reorder, which restores harfbuzz's order. GPOS mark placement is kept as a per-glyph paint
   shift (`XShiftPt`, and `BaselineShiftPt` for y) that moves a mark's ink without moving the pen or
-  reordering glyphs, so each cluster keeps its runes where the bidi reorder expects them. CSS lines,
+  reordering glyphs. A cluster's runes ride on one glyph; its other glyphs carry the cluster's first
+  rune as `BidiRune`, which the bidi reorder uses as their class, so a whole cluster stays in its
+  right-to-left run even after Latin text (`Name: بيت`). CSS lines,
   margin boxes and SVG text (including sideways glyphs in a vertical run) all apply it, so an Arabic
   dot sits on its letter in the raster and the PDF alike, also at the end of a word and after Latin
   text. Glyphs carry their cluster's runes exactly once, so `/ToUnicode` neither duplicates

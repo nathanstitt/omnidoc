@@ -20,7 +20,7 @@ func TestSVGArabicWordKeepsLettersAndDots(t *testing.T) {
 	otf, _ := face.OpenTypeFont()
 	hb := harfbuzz.NewFont(interface{}(otf).(harfbuzz.FaceOpentype))
 	upem := face.UnitsPerEm()
-	for _, word := range []string{"كتب", "اليابان"} {
+	for _, word := range []string{"كتب", "اليابان", "بيت", "باب", "نبت", "ب", "مُحَمَّد", "شكرًا", "السلام"} {
 		doc, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><text x="10" y="60" font-size="40">Name `+word+`</text></svg>`)
 		placed := New(doc).layoutText(firstText(t, doc))
 		type gx struct {
@@ -84,6 +84,36 @@ func TestSVGArabicWordKeepsLettersAndDots(t *testing.T) {
 			if d.x < latin {
 				t.Errorf("%s: an Arabic glyph is drawn at x=%.1f, left of the Latin text", word, d.x)
 			}
+		}
+	}
+}
+
+// Two Arabic words after Latin text in SVG: the phrase stays one right-to-left run,
+// wholly right of the Latin text, with each word's marks on their letters.
+func TestSVGArabicPhraseAfterLatin(t *testing.T) {
+	doc, _ := parseSVG(t, `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="100"><text x="10" y="60" font-size="40">Name بيت كتب</text></svg>`)
+	placed := New(doc).layoutText(firstText(t, doc))
+	latin := math.Inf(-1)
+	var arabic []float64
+	for i := range placed {
+		p := &placed[i]
+		x, _ := p.matrix(render.Identity).Apply(0, 0)
+		if p.glyph.Face != nil {
+			if _, isAr := p.glyph.Face.GID('ب'); isAr {
+				arabic = append(arabic, x)
+				continue
+			}
+		}
+		if len(p.glyph.Runes) > 0 && p.glyph.Runes[0] != ' ' && x > latin {
+			latin = x
+		}
+	}
+	if len(arabic) == 0 {
+		t.Fatal("no Arabic glyphs were placed")
+	}
+	for _, x := range arabic {
+		if x < latin {
+			t.Errorf("an Arabic glyph is placed at x=%.1f, left of the Latin text (%.1f)", x, latin)
 		}
 	}
 }

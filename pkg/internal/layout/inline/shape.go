@@ -300,6 +300,12 @@ type Glyph struct {
 	// from the line baseline. The shaper does not act on it. Zero for callers that don't
 	// set Run.BaselineShiftPt (e.g. DOCX).
 	BaselineShiftPt float64
+	// BidiRune, when non-zero, is the character whose bidi class a glyph WITHOUT runes
+	// takes in the reorder: the first rune of its shaping cluster. A harfbuzz cluster
+	// attributes its runes to one glyph only, and the others (a dot mark, or a
+	// letter's body when the mark carries the runes) would otherwise reorder as
+	// neutrals and could leave their cluster at the edge of a right-to-left run.
+	BidiRune rune
 	// XShiftPt moves the glyph's paint position right (positive) of its pen, in points,
 	// without moving the pen: a GPOS mark placement (an Arabic dot attached to its
 	// letter). Every horizontal emitter adds it to the glyph's paint X. Zero for every
@@ -514,10 +520,12 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 						// would be a different wrong answer.
 						g.Advance = spacedAdvance(sg.advance*r.SizePt, false)
 						g.Runes = sg.runes
+						// The glyphs of a cluster that carry none of its runes take its
+						// first rune's bidi class, so the reorder keeps the cluster together.
+						g.BidiRune = sg.clusterRune
 						// A mark's GPOS placement moves its ink, not the pen: the x offset
 						// is a per-glyph paint shift and the y offset rides the same shift
-						// as vertical-align. Glyph order and advances stay harfbuzz's, so
-						// each cluster keeps its runes where the bidi reorder expects them.
+						// as vertical-align. Glyph order and advances stay harfbuzz's.
 						g.XShiftPt = sg.xOffset * r.SizePt
 						g.BaselineShiftPt += sg.yOffset * r.SizePt
 						out = append(out, g)

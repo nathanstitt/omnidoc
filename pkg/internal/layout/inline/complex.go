@@ -54,6 +54,10 @@ type shapedGlyph struct {
 	gid     uint16
 	advance float64 // em units (advance / upem)
 	runes   []rune  // the source runes of this glyph's cluster; may be several or none
+	// clusterRune is the first source rune of the glyph's cluster. A glyph that carries
+	// no runes (a mark, when its base carries them) uses it as its bidi class, so the
+	// reorder keeps it in its cluster's directional run.
+	clusterRune rune
 	// xOffset and yOffset are harfbuzz's GPOS placement in em units (y positive up):
 	// where the glyph is drawn relative to its pen, without moving the pen. Mark
 	// attachment uses them to put an Arabic dot under or over its letter.
@@ -96,11 +100,12 @@ func shapeComplex(face *pkgfont.Face, text []rune) ([]shapedGlyph, bool) {
 	out := make([]shapedGlyph, 0, len(buf.Info))
 	for i, info := range buf.Info {
 		out = append(out, shapedGlyph{
-			gid:     uint16(info.Glyph),
-			advance: float64(buf.Pos[i].XAdvance) / upem,
-			runes:   clusterRunes(buf.Info, text, i),
-			xOffset: float64(buf.Pos[i].XOffset) / upem,
-			yOffset: float64(buf.Pos[i].YOffset) / upem,
+			gid:         uint16(info.Glyph),
+			advance:     float64(buf.Pos[i].XAdvance) / upem,
+			runes:       clusterRunes(buf.Info, text, i),
+			clusterRune: clusterFirstRune(buf.Info, text, i),
+			xOffset:     float64(buf.Pos[i].XOffset) / upem,
+			yOffset:     float64(buf.Pos[i].YOffset) / upem,
 		})
 	}
 	// Harfbuzz's right-to-left output is in visual order; hand the pipeline logical
@@ -109,6 +114,15 @@ func shapeComplex(face *pkgfont.Face, text []rune) ([]shapedGlyph, bool) {
 		out[i], out[j] = out[j], out[i]
 	}
 	return out, true
+}
+
+// clusterFirstRune returns the first source rune of glyph i's cluster, or 0 when the
+// cluster index falls outside the text.
+func clusterFirstRune(infos []harfbuzz.GlyphInfo, text []rune, i int) rune {
+	if c := int(infos[i].Cluster); c >= 0 && c < len(text) {
+		return text[c]
+	}
+	return 0
 }
 
 // clusterRunes returns the source runes glyph i stands for.

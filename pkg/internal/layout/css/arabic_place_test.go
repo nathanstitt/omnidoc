@@ -130,3 +130,56 @@ func TestArabicWordOnRTLLineKeepsLettersAndDots(t *testing.T) {
 		assertDrawnAsHarfbuzz(t, word, drawn, 40)
 	}
 }
+
+// arabicWordList covers dotted letters in every joining position (initial بيت, medial
+// نبت, final كتب, isolated ب), several dotted letters in a row (باب, اليابان, ثابت),
+// tashkeel (مُحَمَّد), tanween (شكرًا) and the lam-alef ligature (السلام).
+var arabicWordList = []string{"بيت", "باب", "نبت", "كتب", "ب", "اليابان", "ثابت", "مُحَمَّد", "شكرًا", "السلام"}
+
+// After a left-to-right label, every word in the list is drawn exactly as harfbuzz
+// placed it — letters in right-to-left order, each mark on its letter — and wholly to
+// the right of the label. A glyph that lost its cluster's direction in the bidi
+// reorder (a rune-less base or mark resolving as a neutral) lands next to the label
+// instead and fails both checks.
+func TestArabicWordListAfterLatinStaysWhole(t *testing.T) {
+	for _, word := range arabicWordList {
+		pages := layoutPagedHTML(t, `<html><body style="font-size:40px"><p>Name: `+word+`</p></body></html>`, 1000)
+		drawn, latin := arabicGlyphs(pages.Pages[0])
+		for _, d := range drawn {
+			if d.x < latin {
+				t.Errorf("%s: an Arabic glyph is drawn at x=%.1f, left of the Latin text (%.1f)", word, d.x, latin)
+			}
+		}
+		assertDrawnAsHarfbuzz(t, word, drawn, 40)
+	}
+}
+
+// Two Arabic words after a label: the phrase is one right-to-left run, so every
+// glyph is right of the label and each word keeps its own placement.
+func TestArabicPhraseAfterLatinStaysWhole(t *testing.T) {
+	pages := layoutPagedHTML(t, `<html><body style="font-size:40px"><p>Name: بيت كتب</p></body></html>`, 1000)
+	drawn, latin := arabicGlyphs(pages.Pages[0])
+	for _, d := range drawn {
+		if d.x < latin {
+			t.Errorf("an Arabic glyph is drawn at x=%.1f, left of the Latin text (%.1f)", d.x, latin)
+		}
+	}
+	// In visual order the second word (كتب) is on the left, the first (بيت) on the right.
+	_, first := harfbuzzPlacement(t, "بيت")
+	_, second := harfbuzzPlacement(t, "كتب")
+	if len(drawn) != len(first)+len(second) {
+		t.Fatalf("drew %d Arabic glyphs, want %d", len(drawn), len(first)+len(second))
+	}
+	sortByX(drawn)
+	assertDrawnAsHarfbuzz(t, "كتب", drawn[:len(second)], 40)
+	assertDrawnAsHarfbuzz(t, "بيت", drawn[len(second):], 40)
+}
+
+// sortByX orders drawn glyphs left to right, marks after a base at the same X.
+func sortByX(d []placedGID) {
+	for i := 1; i < len(d); i++ {
+		for j := i; j > 0 && d[j].x < d[j-1].x; j-- {
+			d[j], d[j-1] = d[j-1], d[j]
+		}
+	}
+}
