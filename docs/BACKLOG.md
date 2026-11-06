@@ -12,7 +12,7 @@ Status legend: ☐ open · ◐ in progress.
 
 ## Where it stands
 
-**38 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
+**39 open · 2 in progress**, audited against the code on 2026-09-01 (see below). The engine is
 feature-complete across its stated scope; what remains is a long tail of approximations, each
 degrading gracefully — and, where a degradation changes rendering, saying so in the log.
 
@@ -208,3 +208,8 @@ trusting any entry that has aged** — grep for the claimed symptom first.
 - ☐ **N7. `@page`-level declarations on margin boxes.** *Small.* Margin boxes inherit the root
   element's font and color (`marginBaseFrom`, `marginbox.go`), but a font or color declared on
   `@page` itself is not applied: `UsedPage` does not carry those declarations.
+- ☐ **N8. `break-*: avoid` between nested blocks, and keep-with-next for headings.** *Medium.* The
+  avoid keep (`breakAvoidBetween`, `paginate.go`) runs only between top-level blocks; a block split
+  at a child boundary (`splitMixedBlock`, `fragmentpage.go`) ignores it, and the UA sheet (`html/ua.go`) sets
+  no `break-after: avoid` on `h1`–`h6`. So a heading inside a section can end a page alone (showcase
+  §38 "The block control"). Needs the avoid chain in the mixed-block splitter and a heading default.
