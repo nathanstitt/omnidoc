@@ -510,7 +510,8 @@ func ShapeContext(ctx context.Context, faces *layoutfont.FaceCache, runs []Run, 
 						g.Advance = spacedAdvance(sg.advance*r.SizePt, false)
 						g.Runes = sg.runes
 						// A mark's GPOS vertical placement (positive = up) rides the same
-						// per-glyph shift as vertical-align, so every backend applies it.
+						// per-glyph shift as vertical-align. Only the CSS line emitter applies
+						// that shift; margin boxes and SVG text drop it (BACKLOG G11).
 						g.BaselineShiftPt += sg.yOffset * r.SizePt
 						out = append(out, g)
 						lineCol += g.Advance

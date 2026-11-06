@@ -120,16 +120,56 @@ func shapeComplex(face *pkgfont.Face, text []rune) ([]shapedGlyph, bool) {
 //
 // A glyph at pen p with x offset o is drawn at p+o. Giving the glyph before it an
 // advance larger by o, and the glyph itself an advance smaller by o, draws it at p+o
-// and leaves the pen after it unchanged. The segment's first glyph has no glyph
-// before it in the segment; harfbuzz gives offsets to marks, which never come first,
-// so its offset (none in practice) is left unapplied.
+// and leaves the pen after it unchanged.
+//
+// The segment's first visual glyph has no glyph before it, and in right-to-left output
+// it is often a mark: a word-final letter's dots come first, ahead of their base (كتب,
+// بيت). For that leading run of zero-advance marks the base is moved in front of them:
+// the base keeps pen p, each mark is drawn at p plus its offset, and the last mark's
+// advance carries the pen on to p plus the base's advance, where it was before.
 func foldXOffsets(out []shapedGlyph, xOffsets []float64) {
-	for i := 1; i < len(out); i++ {
+	start := 1
+	if k := leadingMarks(out, xOffsets); k > 0 {
+		base, width := out[k], out[k].advance
+		marks := append([]shapedGlyph(nil), out[:k]...)
+		offs := append([]float64(nil), xOffsets[:k]...)
+		out[0] = base
+		out[0].advance = offs[0]
+		for j := range marks {
+			out[j+1] = marks[j]
+			next := width
+			if j+1 < k {
+				next = offs[j+1]
+			}
+			out[j+1].advance = next - offs[j]
+		}
+		start = k + 1
+	}
+	for i := start; i < len(out); i++ {
 		if o := xOffsets[i]; o != 0 {
 			out[i-1].advance += o
 			out[i].advance -= o
 		}
 	}
+}
+
+// leadingMarks returns the length of the run of zero-advance glyphs that starts the
+// visual output when at least one of them carries an x offset and a glyph with an
+// advance (their base) follows; 0 otherwise.
+func leadingMarks(out []shapedGlyph, xOffsets []float64) int {
+	offset := false
+	for k := range out {
+		if out[k].advance != 0 {
+			if offset {
+				return k
+			}
+			return 0
+		}
+		if xOffsets[k] != 0 {
+			offset = true
+		}
+	}
+	return 0
 }
 
 // clusterRunes returns the source runes glyph i stands for.

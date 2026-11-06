@@ -1,7 +1,10 @@
 package inline
 
 import (
+	"math"
 	"testing"
+
+	"github.com/benoitkugler/textlayout/harfbuzz"
 
 	pkgfont "github.com/nathanstitt/omnidoc/pkg/internal/font"
 )
@@ -35,6 +38,64 @@ func TestArabicJoiningFormsFollowReadingOrder(t *testing.T) {
 		if got[i] != want[i] {
 			t.Errorf("letters in logical order = %v, want %v", got, want)
 			break
+		}
+	}
+}
+
+// Every shaped glyph must be drawn where harfbuzz placed it. shapeComplex returns
+// logical order with GPOS x offsets folded into advances; drawn in visual order (the
+// reverse), each glyph's pen position must equal harfbuzz's pen plus x offset. A
+// word-final letter's mark is harfbuzz's FIRST visual glyph (كتب's beh dot, بيت's
+// teh dots), the case with no glyph before it to absorb the offset.
+func TestShapedGlyphsLandWhereHarfbuzzPlacedThem(t *testing.T) {
+	face, ok := pkgfont.LoadScriptFallback('م', pkgfont.Style{})
+	if !ok {
+		t.Fatal("no bundled Arabic face")
+	}
+	otf, _ := face.OpenTypeFont()
+	hbFont := harfbuzz.NewFont(interface{}(otf).(harfbuzz.FaceOpentype))
+	upem := face.UnitsPerEm()
+	for _, word := range []string{"كتب", "بيت", "مرحبا"} {
+		buf := harfbuzz.NewBuffer()
+		buf.AddRunes([]rune(word), 0, -1)
+		buf.GuessSegmentProperties()
+		buf.Props.Direction = harfbuzz.RightToLeft
+		buf.Shape(hbFont, nil)
+		want := map[uint16][]float64{}
+		pen := 0.0
+		for i, info := range buf.Info {
+			gid := uint16(info.Glyph)
+			want[gid] = append(want[gid], pen+float64(buf.Pos[i].XOffset)/upem)
+			pen += float64(buf.Pos[i].XAdvance) / upem
+		}
+
+		shaped, ok := shapeComplex(face, []rune(word))
+		if !ok {
+			t.Fatalf("%s: shaping failed", word)
+		}
+		got := map[uint16][]float64{}
+		pen = 0
+		for i := len(shaped) - 1; i >= 0; i-- { // visual order
+			got[shaped[i].gid] = append(got[shaped[i].gid], pen)
+			pen += shaped[i].advance
+		}
+		for gid, xs := range want {
+			gs := got[gid]
+			if len(gs) != len(xs) {
+				t.Errorf("%s: glyph %s drawn %d times, want %d", word, face.GlyphName(gid), len(gs), len(xs))
+				continue
+			}
+			for _, x := range xs {
+				found := false
+				for _, g := range gs {
+					if math.Abs(g-x) < 1e-6 {
+						found = true
+					}
+				}
+				if !found {
+					t.Errorf("%s: glyph %s drawn at %v em, harfbuzz placed it at %.4f", word, face.GlyphName(gid), gs, x)
+				}
+			}
 		}
 	}
 }
