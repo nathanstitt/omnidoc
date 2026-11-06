@@ -542,7 +542,11 @@ func bucketBlocks(blocks []*Fragment, pageH, cbWidth float64, logf func(string, 
 		// Widows/orphans line splitting of a block LEADING a fresh page that is itself
 		// taller than a whole page (the iterative case — a tail that still overflows, or a
 		// paragraph taller than a page). The head fills this page; the tail is queued.
-		if !forcedBefore && len(cur.blocks) == 0 && lineSplittable(b) && (b.Y+b.H)-cur.top > pageH {
+		// A forced break-before does not stop this split: it has already been honored by
+		// closing the previous page (or is a no-op on the first block), and its tail
+		// keeps the break-before style, so excluding forced blocks here left every page
+		// after the first overflowing and clipped.
+		if len(cur.blocks) == 0 && lineSplittable(b) && (b.Y+b.H)-cur.top > pageH {
 			res := splitAnyBlockForPage(b, cur.top+pageH, widowsOf(b), orphansOf(b))
 			if res.head != nil && res.tail != nil {
 				noteSplit(res.head, res.tail)

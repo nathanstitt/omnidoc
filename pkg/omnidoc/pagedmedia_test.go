@@ -3,9 +3,11 @@ package omnidoc
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"image"
 	"image/color"
 	"math"
+	"strings"
 	"testing"
 )
 
@@ -120,5 +122,37 @@ func TestMarginBoxInheritsTheRootFont(t *testing.T) {
 	}
 	if bytes.Contains(pdf.Bytes(), []byte("TeXGyreTermes")) {
 		t.Error("the footer used the serif face, not the root's sans-serif")
+	}
+}
+
+// A block that starts with a forced break and is taller than a page must still
+// split across pages. The forced break only closes the page before it; it must
+// not stop the block from fragmenting, or everything below the first page
+// overflows the page box and is clipped.
+func TestForcedBreakBlockTallerThanAPageSplits(t *testing.T) {
+	var paras strings.Builder
+	for i := 1; i <= 60; i++ {
+		fmt.Fprintf(&paras, "<p>Paragraph %d</p>", i)
+	}
+	pages := func(lead, sectionStyle string) int {
+		src := `<!doctype html><html><head><style>@page { size: Letter; margin: 0.5in }</style></head><body>` +
+			lead + `<section style="` + sectionStyle + `">` + paras.String() + `</section></body></html>`
+		doc, err := OpenHTMLBytes([]byte(src), WithDefaultPaged(), WithBundledFonts())
+		if err != nil {
+			t.Fatalf("open: %v", err)
+		}
+		return doc.PageCount()
+	}
+	unforced := pages("", "")
+	if unforced < 2 {
+		t.Fatalf("precondition: the section must be taller than a page, got %d page(s)", unforced)
+	}
+	// A forced break on the first block is a no-op, so the page count must match.
+	if got := pages("", "break-before: page"); got != unforced {
+		t.Errorf("forced-break first section: %d pages, want %d (the block did not split)", got, unforced)
+	}
+	// After a lead paragraph the break adds exactly the lead's page.
+	if got := pages("<p>Lead</p>", "break-before: page"); got != unforced+1 {
+		t.Errorf("forced-break section after a lead: %d pages, want %d (the block did not split)", got, unforced+1)
 	}
 }
