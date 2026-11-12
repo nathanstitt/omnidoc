@@ -87,6 +87,65 @@ func TestRasterizePageRegionMatchesFullPage(t *testing.T) {
 	}
 }
 
+// TestRasterizePageRegionStrokesMatchFullPage covers the stroke path, which
+// builds its own coverage mask rather than going through the fill rasterizer.
+// The mask must be shaped by the PAGE, not by the region surface: rasterx
+// derives its sampling from the mask rectangle, so a stroke truncated at the
+// region edge comes out with slightly different coverage than the same stroke
+// rasterized whole. Found on a dashboard painted as vertical strips, where a
+// stroked SVG icon lying across a strip edge differed by up to 4/255.
+//
+// Each region edge below cuts through curved, diagonal, dashed and
+// round-capped strokes, since straight axis-aligned strokes have no
+// antialiased coverage along the cut to disagree about.
+func TestRasterizePageRegionStrokesMatchFullPage(t *testing.T) {
+	const html = `<!doctype html><html><body style="margin:0;width:900px;height:600px;background:#101418">
+<svg width="900" height="600" viewBox="0 0 900 600" style="position:absolute;left:0;top:0">
+  <circle cx="300.5" cy="200.3" r="90.7" fill="none" stroke="#e8a21b" stroke-width="3.5"/>
+  <path d="M 120.2 80.7 L 520.9 310.4 L 180.3 520.6" fill="none" stroke="#4aa8ff" stroke-width="7.3" stroke-linejoin="miter"/>
+  <path d="M 250 450 C 330 300, 420 560, 610 380" fill="none" stroke="#cfe" stroke-width="2.25" stroke-linecap="round" stroke-dasharray="11 5"/>
+  <ellipse cx="640.4" cy="150.6" rx="130.2" ry="60.8" fill="none" stroke="#f66" stroke-width="1.2"/>
+  <line x1="60.4" y1="560.2" x2="840.7" y2="40.9" stroke="#8f8" stroke-width="4.6" stroke-linecap="round"/>
+</svg>
+</body></html>`
+	doc, err := OpenHTMLBytes([]byte(html), WithViewportWidth(900), WithBundledFonts())
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	opts := RasterOptions{DPI: 96, BundledFonts: true}
+	fullImg, err := doc.RasterizePage(context.Background(), 0, opts)
+	if err != nil {
+		t.Fatalf("RasterizePage: %v", err)
+	}
+	full := fullImg.(*image.RGBA)
+
+	for _, region := range []image.Rectangle{
+		image.Rect(0, 0, 300, 200),     // edges through the circle's centre
+		image.Rect(300, 200, 600, 400), // the other side of the same cuts
+		image.Rect(217, 133, 431, 377), // odd offsets, every stroke crosses
+		image.Rect(450, 0, 900, 600),   // a vertical strip, as a banded paint uses
+		image.Rect(0, 290, 900, 310),   // a thin horizontal band
+	} {
+		got, err := doc.RasterizePageRegion(context.Background(), 0, region, opts)
+		if err != nil {
+			t.Fatalf("region %v: %v", region, err)
+		}
+		gi := got.(*image.RGBA)
+		diff := 0
+		for y := region.Min.Y; y < region.Max.Y; y++ {
+			for x := region.Min.X; x < region.Max.X; x++ {
+				if gi.RGBAAt(x, y) != full.RGBAAt(x, y) {
+					diff++
+				}
+			}
+		}
+		if diff != 0 {
+			t.Errorf("region %v: %d of %d pixels differ from the full-page render; a stroke crossing the region edge must be rasterized as it is on the whole page",
+				region, diff, region.Dx()*region.Dy())
+		}
+	}
+}
+
 // TestRasterizePageRegionClipsToPage checks the two out-of-bounds behaviours:
 // a region hanging off the edge is clipped to the page (the caller gets the
 // part that exists), and one entirely off the page is an error rather than an
