@@ -76,7 +76,18 @@ func (d *Device) Stroke(path *render.Path, paint render.StrokePaint) {
 	bb.Min.Y -= pad
 	bb.Max.X += pad
 	bb.Max.Y += pad
-	bb = bb.Intersect(d.img.Bounds())
+	// Nothing this stroke covers is writable: skip before rasterizing. On a
+	// region Device this is what keeps replaying the page's item list cheap.
+	if !bb.Overlaps(d.img.Bounds()) {
+		return
+	}
+	// Clipped to the PAGE, not to this Device's surface, for the same reason
+	// rasterizeMask does it: rasterx derives its sampling from the mask
+	// rectangle, so a stroke truncated at a region edge gets different
+	// coverage than the same stroke rasterized whole, and the region stops
+	// being pixel-identical to the page. compositeOffset discards the part of
+	// the mask this Device cannot write.
+	bb = bb.Intersect(d.page)
 	if bb.Empty() {
 		return
 	}
